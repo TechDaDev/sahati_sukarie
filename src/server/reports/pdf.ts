@@ -293,7 +293,7 @@ export async function resolveChromiumPath(): Promise<string | null> {
 
   try {
     const puppeteer = await import('puppeteer');
-    const bundled = puppeteer.default.executablePath();
+    const bundled = await puppeteer.default.executablePath();
     if (bundled && existsSync(bundled)) return bundled;
   } catch {
     /* الحزمة غير مثبّتة */
