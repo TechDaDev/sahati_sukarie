@@ -1,0 +1,114 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* خط Cairo يُحمّل محليًا (لا يعتمد على شبكة خارجية داخل المعاينة) */
+@font-face {
+  font-family: 'Cairo';
+  src: url('/fonts/Cairo-400.ttf') format('truetype');
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Cairo';
+  src: url('/fonts/Cairo-600.ttf') format('truetype');
+  font-weight: 600;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Cairo';
+  src: url('/fonts/Cairo-700.ttf') format('truetype');
+  font-weight: 700;
+  font-display: swap;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-canvas text-ink antialiased;
+    font-family: 'Cairo', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  }
+  h1, h2, h3, h4 {
+    @apply font-bold text-ink;
+  }
+  /* الأرقام والوحدات الطبية تُعرض دائمًا بشكل مقروء داخل النص العربي */
+  .num, .unit {
+    font-variant-numeric: tabular-nums;
+    direction: ltr;
+    unicode-bidi: embed;
+    display: inline-block;
+  }
+  input[type='number'] {
+    direction: ltr;
+    text-align: right;
+  }
+  input[type='date'],
+  input[type='time'] {
+    direction: ltr;
+    text-align: right;
+  }
+  ::selection {
+    background: #CDEFEE;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl border border-brand-100 bg-white p-4 shadow-card sm:p-5;
+  }
+  .label {
+    @apply mb-1.5 block text-sm font-semibold text-ink;
+  }
+  .hint {
+    @apply mt-1 text-xs text-ink-muted;
+  }
+  .field {
+    @apply w-full rounded-xl border border-brand-200 bg-white px-3.5 py-2.5 text-[15px] text-ink outline-none transition
+      placeholder:text-ink-muted/70 focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 disabled:bg-brand-50;
+  }
+  .field-error {
+    @apply border-alert focus:border-alert focus:ring-alert/10;
+  }
+  .btn {
+    @apply inline-flex select-none items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition
+      focus:outline-none focus-visible:ring-4 focus-visible:ring-brand-500/20 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+  .btn-primary {
+    @apply btn bg-brand-500 text-white hover:bg-brand-600 active:bg-brand-700;
+  }
+  .btn-teal {
+    @apply btn bg-teal-500 text-white hover:bg-teal-700;
+  }
+  .btn-outline {
+    @apply btn border border-brand-200 bg-white text-brand-600 hover:bg-brand-50;
+  }
+  .btn-ghost {
+    @apply btn text-ink-soft hover:bg-brand-50;
+  }
+  .btn-danger {
+    @apply btn bg-alert text-white hover:brightness-95;
+  }
+  .btn-sm {
+    @apply px-3 py-1.5 text-xs;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold;
+  }
+  .section-title {
+    @apply mb-3 flex items-center gap-2 text-base font-bold text-ink;
+  }
+  .divider {
+    @apply my-4 h-px w-full bg-brand-100;
+  }
+}
+
+/* شرائط تمرير أنيقة للقوائم الطويلة */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: #BBD5EC; border-radius: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+@media print {
+  .no-print { display: none !important; }
+}
