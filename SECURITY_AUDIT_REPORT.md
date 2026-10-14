@@ -2,7 +2,7 @@
 
 **Assessment date:** 2026-10-14
 **Audited base commit:** `61659b269f49a51846a29eb4ae1f0c4a819dce14`
-**Remediation commit:** recorded after deployment below
+**Remediation commits:** `2f573e3008dd322164e477690358a78b4274c300`, `246365fee9f558568dd6687c09adb111b87ae395`, `463d1ec`
 **Scope:** Next.js app, API routes, server services, PostgreSQL schema/migrations, auth/session/recovery, report rendering, dependencies, and existing Railway production service.
 **Method:** graph-guided source review, route inventory, dependency audit, isolated PostgreSQL concurrency tests, local Chromium rendering, local HTTP smoke checks, safe live Railway checks.
 
@@ -10,7 +10,7 @@
 
 The review found races in rate limiting, login lockout, and recovery-token redemption. It also found spoofable forwarding-header use, role and registration enumeration, unbounded JSON body reads, session-expiry mismatch, and Chromium running without its sandbox. Fixes were implemented and exercised in a synthetic local PostgreSQL database. Patient record queries use the authenticated patient profile as their SQL ownership filter; nested medication association checks use the same owner.
 
-The app now requires strong production secrets, HTTPS `APP_URL`, and bounded session settings. API JSON reads have a 1 MiB cap and reject excess bodies with 413. A nonce-based CSP and HSTS are set. Chromium runs without `--no-sandbox`; Railway is configured to run the app as UID 1000. A health endpoint checks database reachability and refuses root execution in production.
+The app now requires strong production secrets, HTTPS `APP_URL`, and bounded session settings. API JSON reads have a 1 MiB cap and reject excess bodies with 413. A nonce-based CSP and HSTS are set. Chromium runs without `--no-sandbox`; Railway runs the app as UID 1000. The app uses Railway's assigned runtime port, and the Railway domain forwards to that port. The health endpoint checks database reachability and refuses root execution in production.
 
 Production data was not modified. Production deployment status and live verification are recorded in `RAILWAY_SECURITY_DEPLOYMENT_VERIFICATION.md`. Full dependency audit still reports 5 high and 6 moderate advisories in development/build tooling; production dependency audit reports zero. No major dependency upgrade was applied because available automated fixes require breaking Tailwind/drizzle-kit changes.
 
@@ -127,8 +127,8 @@ All patient-record read routes observed derive the owner from the server session
 - **Evidence:** Launch arguments included `--no-sandbox` and `--disable-setuid-sandbox`.
 - **Exploitability / impact:** A Chromium exploit would have weaker process isolation while rendering report content.
 - **Remediation:** Removed both sandbox-disabling flags. Railway app service now uses `RAILWAY_RUN_UID=1000`; CSP in generated report blocks script and remote-resource execution. Railway health endpoint returns unavailable if production process runs as root.
-- **Test:** Local Google Chrome launched and generated a PDF without sandbox-disabling flags using hostile synthetic text; runtime UID and live PDF require deployment verification.
-- **Status:** MITIGATED pending live health verification
+- **Test:** Local Google Chrome launched and generated a PDF without sandbox-disabling flags using hostile synthetic text; production health returned 200 with the non-root guard enabled. Authenticated production PDF generation was not tested.
+- **Status:** MITIGATED; authenticated production PDF generation remains unverified
 
 ### SEC-006 — Weak production environment validation
 
@@ -218,7 +218,7 @@ All patient-record read routes observed derive the owner from the server session
 - Local HTTP smoke: `/`, `/login`, `/register`, `/admin/login` returned 200 with Arabic text and nonce CSP; `/dashboard` redirected to login; health returned 503 only because test run used unreachable dummy DB URL.
 - Full `npm audit --json`: 5 high, 6 moderate, 0 critical (development/build dependency tree).
 - `npm audit --omit=dev --json`: 0 vulnerabilities.
-- Railway production checks: see deployment verification report.
+- Railway deployment `4c180cdc-2183-4ea4-8779-999d2c333a20` (`SUCCESS`, commit `463d1ec`): migration and `/api/health` passed. Public `/`, `/login`, `/register`, and `/admin/login` returned 200 with HSTS and nonce CSP; unauthenticated `/dashboard` and `/admin` redirected to their login pages; unauthenticated PDF endpoint returned 401. The Railway domain target was corrected from port 3000 to 8080. See deployment verification report.
 
 ## Residual risks and limitations
 
@@ -232,4 +232,4 @@ All patient-record read routes observed derive the owner from the server session
 
 ## Final assessment
 
-**Result:** pending final production runtime checks. Do not treat the app as fully production-verified until the deployment report records health, database, public route, header, and protected-route checks.
+**Result:** Remediations are deployed and the public health, database readiness, security headers, and unauthenticated route gates passed. The audit remains **PARTIAL** because positive authentication, session-cookie verification, authenticated PDF generation, backup restore, database least-privilege review, and full Git secret-history scan were not verified. Production patient data was not read or changed.
