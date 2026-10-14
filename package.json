@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start -H 0.0.0.0 -p 3000",
     "typecheck": "tsc --noEmit",
+    "test:security": "NODE_ENV=test DATABASE_URL=\"${SECURITY_TEST_DATABASE_URL:-postgresql://test:test@127.0.0.1:1/test}\" SESSION_SECRET=security-test-session-secret-with-32-bytes FIELD_ENCRYPTION_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= NATIONAL_ID_PEPPER=security-test-national-id-pepper-with-32-bytes APP_URL=https://example.test tsx --test tests/security/*.test.ts",
     "db:migrate": "tsx scripts/migrate.ts",
     "db:setup": "bash scripts/setup-postgres.sh && tsx scripts/migrate.ts && tsx scripts/create-admin.ts",
     "db:backup": "bash scripts/backup-db.sh",

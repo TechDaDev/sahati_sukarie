@@ -2,7 +2,7 @@
  * خدمة المصادقة المشتركة بين واجهات المريض والمدير.
  * تُغلّف سياسة القفل بعد المحاولات الفاشلة وتحديد المعدل.
  */
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, isNull, lte, or, sql } from 'drizzle-orm';
 import { db } from '../db';
 import { users } from '../db/schema';
 import { ApiError, assertRateLimit, createSession, setSessionCookie, verifyPassword, writeAudit } from '../auth/session';
@@ -49,12 +49,12 @@ export async function authenticate(
 
   const valid = await verifyPassword(password, row.passwordHash);
   if (!valid) {
-    const failed = row.failedLoginCount + 1;
-    await db.update(users).set({
-      failedLoginCount: failed,
-      lockedUntil: failed >= MAX_FAILED ? new Date(Date.now() + LOCK_MINUTES * 60_000) : null,
+    const [updated] = await db.update(users).set({
+      failedLoginCount: sql`LEAST(${users.failedLoginCount} + 1, ${MAX_FAILED})`,
+      lockedUntil: sql`CASE WHEN ${users.failedLoginCount} + 1 >= ${MAX_FAILED} THEN ${new Date(Date.now() + LOCK_MINUTES * 60_000)}::timestamptz ELSE NULL::timestamptz END`,
       updatedAt: new Date(),
-    }).where(eq(users.id, row.id));
+    }).where(eq(users.id, row.id)).returning({ failedLoginCount: users.failedLoginCount });
+    const failed = updated?.failedLoginCount ?? MAX_FAILED;
 
     await writeAudit({
       actorUserId: row.id, actorRole: row.role === 'ADMIN' ? 'ADMIN' : 'PATIENT',
@@ -69,15 +69,17 @@ export async function authenticate(
   }
 
   if (meta.requireRole && row.role !== meta.requireRole) {
-    throw new ApiError(403, 'WRONG_PORTAL',
-      meta.requireRole === 'ADMIN'
-        ? 'هذا الحساب ليس حساب مدير.'
-        : 'حساب المدير لا يمكنه تسجيل الدخول من بوابة المرضى.');
+    throw new ApiError(401, 'INVALID_CREDENTIALS', INVALID_CREDENTIALS);
   }
 
-  await db.update(users).set({
-    failedLoginCount: 0, lockedUntil: null, lastLoginAt: new Date(), updatedAt: new Date(),
-  }).where(eq(users.id, row.id));
+  const now = new Date();
+  const [unlocked] = await db.update(users).set({
+    failedLoginCount: 0, lockedUntil: null, lastLoginAt: now, updatedAt: now,
+  }).where(and(eq(users.id, row.id), or(isNull(users.lockedUntil), lte(users.lockedUntil, now))))
+    .returning({ id: users.id });
+  if (!unlocked) {
+    throw new ApiError(429, 'ACCOUNT_LOCKED', 'تم قفل الحساب مؤقتًا بسبب محاولات فاشلة متكررة. حاول بعد قليل.');
+  }
 
   const session = await createSession(row.id, { ip: meta.ip, userAgent: meta.userAgent });
   await setSessionCookie(session.token, session.expiresAt, session.csrfToken);

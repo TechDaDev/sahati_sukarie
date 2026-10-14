@@ -3,6 +3,7 @@
  */
 import bcrypt from 'bcryptjs';
 import { and, eq, isNull, sql } from 'drizzle-orm';
+import { isIP } from 'node:net';
 import { cookies, headers } from 'next/headers';
 import { db } from '../db';
 import { sessions, users, auditLogs, rateLimitCounters } from '../db/schema';
@@ -65,7 +66,7 @@ export async function createSession(userId: string, meta?: { ip?: string | null;
     absoluteExpiresAt: absolute,
   });
 
-  return { token, csrfToken, expiresAt: idle };
+  return { token, csrfToken, expiresAt: absolute };
 }
 
 export async function setSessionCookie(token: string, expiresAt: Date, csrfToken?: string): Promise<void> {
@@ -139,7 +140,10 @@ export async function getCurrentSession(): Promise<SessionRecord | null> {
   }
 
   // تجديد انتهاء الخمول
-  const idle = new Date(now.getTime() + env().SESSION_IDLE_HOURS * 3600_000);
+  const idle = new Date(Math.min(
+    now.getTime() + env().SESSION_IDLE_HOURS * 3600_000,
+    row.absoluteExpiresAt.getTime(),
+  ));
   await db.update(sessions).set({ lastSeenAt: now, idleExpiresAt: idle }).where(eq(sessions.id, row.sessionId));
 
   return {
@@ -251,30 +255,18 @@ export type RateLimitRule = { key: string; limit: number; windowSeconds: number 
  */
 export async function checkRateLimit(rule: RateLimitRule): Promise<boolean> {
   const now = new Date();
-  const rows = await db
-    .select()
-    .from(rateLimitCounters)
-    .where(eq(rateLimitCounters.key, rule.key))
-    .limit(1);
-  const row = rows[0];
-
-  if (!row || now.getTime() - row.windowStart.getTime() > rule.windowSeconds * 1000) {
-    await db
-      .insert(rateLimitCounters)
-      .values({ key: rule.key, windowStart: now, counter: 1 })
-      .onConflictDoUpdate({
-        target: rateLimitCounters.key,
-        set: { windowStart: now, counter: 1 },
-      });
-    return true;
-  }
-
-  if (row.counter >= rule.limit) return false;
-
-  await db.update(rateLimitCounters)
-    .set({ counter: row.counter + 1 })
-    .where(eq(rateLimitCounters.key, rule.key));
-  return true;
+  const cutoff = new Date(now.getTime() - rule.windowSeconds * 1000);
+  const [row] = await db.insert(rateLimitCounters)
+    .values({ key: rule.key, windowStart: now, counter: 1 })
+    .onConflictDoUpdate({
+      target: rateLimitCounters.key,
+      set: {
+        windowStart: sql`CASE WHEN ${rateLimitCounters.windowStart} <= ${cutoff} THEN ${now} ELSE ${rateLimitCounters.windowStart} END`,
+        counter: sql`CASE WHEN ${rateLimitCounters.windowStart} <= ${cutoff} THEN 1 ELSE LEAST(${rateLimitCounters.counter} + 1, ${rule.limit + 1}) END`,
+      },
+    })
+    .returning({ counter: rateLimitCounters.counter });
+  return (row?.counter ?? rule.limit + 1) <= rule.limit;
 }
 
 export async function assertRateLimit(rule: RateLimitRule, message: string): Promise<void> {
@@ -304,9 +296,10 @@ export async function writeAudit(entry: {
   });
 }
 
-/** استخراج عنوان IP من الترويسات */
+/** Trust only the platform header set by Railway's proxy. */
 export function clientIp(request: Request): string {
-  const fwd = request.headers.get('x-forwarded-for');
-  if (fwd) return fwd.split(',')[0]!.trim();
-  return request.headers.get('x-real-ip') ?? 'unknown';
+  const candidate = request.headers.get('x-real-ip');
+  if (!candidate) return 'unknown';
+  const ip = candidate.trim();
+  return ip.length <= 64 && isIP(ip) !== 0 ? ip : 'unknown';
 }

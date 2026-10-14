@@ -26,6 +26,31 @@ const ADMIN_PUBLIC = ['/admin/login'];
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const hasSession = Boolean(request.cookies.get('sahati_session')?.value);
+  const nonceBytes = crypto.getRandomValues(new Uint8Array(16));
+  const nonce = btoa(String.fromCharCode(...nonceBytes));
+  const csp = [
+    "default-src 'self'",
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
+    `style-src 'self' 'nonce-${nonce}' 'unsafe-inline'`,
+    "style-src-attr 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "font-src 'self' data:",
+    "connect-src 'self'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'self'",
+    "upgrade-insecure-requests",
+  ].join('; ');
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set('Content-Security-Policy', csp);
+  requestHeaders.set('x-nonce', nonce);
+
+  const continueWithPolicy = () => {
+    const response = NextResponse.next({ request: { headers: requestHeaders } });
+    response.headers.set('Content-Security-Policy', csp);
+    return response;
+  };
 
   if (ADMIN_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
     const isPublic = ADMIN_PUBLIC.some((prefix) => pathname.startsWith(prefix));
@@ -33,31 +58,27 @@ export function middleware(request: NextRequest) {
       const url = request.nextUrl.clone();
       url.pathname = '/admin/login';
       url.search = '';
-      return NextResponse.redirect(url);
+      const response = NextResponse.redirect(url);
+      response.headers.set('Content-Security-Policy', csp);
+      return response;
     }
-    return NextResponse.next();
+    return continueWithPolicy();
   }
 
   if (PROTECTED_PREFIXES.some((prefix) => pathname.startsWith(prefix)) && !hasSession) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     url.search = '';
-    return NextResponse.redirect(url);
+    const response = NextResponse.redirect(url);
+    response.headers.set('Content-Security-Policy', csp);
+    return response;
   }
 
-  return NextResponse.next();
+  return continueWithPolicy();
 }
 
 export const config = {
   matcher: [
-    '/dashboard/:path*',
-    '/profile/:path*',
-    '/glucose/:path*',
-    '/medications/:path*',
-    '/daily-log/:path*',
-    '/reports/:path*',
-    '/settings/:path*',
-    '/urgent-help/:path*',
-    '/admin/:path*',
+    '/((?!_next/static|_next/image|favicon.ico).*)',
   ],
 };

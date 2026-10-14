@@ -19,6 +19,29 @@ const schema = z.object({
   /** مسار متصفح Chromium المستخدم لتوليد ملفات PDF العربية */
   CHROMIUM_EXECUTABLE_PATH: z.string().optional(),
   PDF_ENGINE: z.enum(['chromium']).default('chromium'),
+}).superRefine((value, ctx) => {
+  if (value.NODE_ENV !== 'production') return;
+  for (const name of ['SESSION_SECRET', 'NATIONAL_ID_PEPPER'] as const) {
+    if (Buffer.byteLength(value[name], 'utf8') < 32) {
+      ctx.addIssue({ code: 'custom', path: [name], message: 'يجب أن يحتوي على 32 بايت على الأقل في الإنتاج' });
+    }
+  }
+  const rawKey = value.FIELD_ENCRYPTION_KEY.trim();
+  const decodedKey = Buffer.from(rawKey, 'base64');
+  if (decodedKey.length !== 32 && Buffer.byteLength(rawKey, 'utf8') !== 32) {
+    ctx.addIssue({ code: 'custom', path: ['FIELD_ENCRYPTION_KEY'], message: 'يجب أن يكون مفتاح AES-256 صالحًا بطول 32 بايت' });
+  }
+  let appUrl: URL | null = null;
+  try { appUrl = new URL(value.APP_URL); } catch { /* reported below */ }
+  if (!appUrl || appUrl.protocol !== 'https:' || appUrl.username || appUrl.password) {
+    ctx.addIssue({ code: 'custom', path: ['APP_URL'], message: 'يجب أن يكون عنوان HTTPS صالحًا دون بيانات اعتماد' });
+  }
+  if (!Number.isInteger(value.SESSION_IDLE_HOURS) || value.SESSION_IDLE_HOURS < 1 || value.SESSION_IDLE_HOURS > 168) {
+    ctx.addIssue({ code: 'custom', path: ['SESSION_IDLE_HOURS'], message: 'يجب أن يكون بين 1 و168 ساعة' });
+  }
+  if (!Number.isInteger(value.SESSION_ABSOLUTE_DAYS) || value.SESSION_ABSOLUTE_DAYS < 1 || value.SESSION_ABSOLUTE_DAYS > 30) {
+    ctx.addIssue({ code: 'custom', path: ['SESSION_ABSOLUTE_DAYS'], message: 'يجب أن يكون بين 1 و30 يومًا' });
+  }
 });
 
 export type Env = z.infer<typeof schema>;

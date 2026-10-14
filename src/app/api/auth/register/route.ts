@@ -7,7 +7,7 @@ import { db } from '@/server/db';
 import { patientProfiles, users } from '@/server/db/schema';
 import { ApiError, assertRateLimit, clientIp, createSession, hashPassword, setSessionCookie, writeAudit } from '@/server/auth/session';
 import { blindIndex, encryptField } from '@/server/lib/crypto';
-import { handleError, ok, parseBody } from '@/server/http';
+import { fail, handleError, ok, parseBody } from '@/server/http';
 import { registerSchema } from '@/server/validation/schemas';
 
 export async function POST(request: Request) {
@@ -27,9 +27,7 @@ export async function POST(request: Request) {
       columns: { id: true },
     });
     if (existingEmail) {
-      throw new ApiError(409, 'EMAIL_TAKEN', 'هذا البريد الإلكتروني مستخدم مسبقًا.', {
-        email: 'هذا البريد الإلكتروني مستخدم مسبقًا',
-      });
+      throw new ApiError(409, 'REGISTRATION_UNAVAILABLE', 'تعذر إنشاء الحساب بهذه البيانات. تحقق من البيانات أو تواصل مع الإدارة.');
     }
 
     const existingId = await db.query.patientProfiles.findFirst({
@@ -37,9 +35,7 @@ export async function POST(request: Request) {
       columns: { id: true },
     });
     if (existingId) {
-      throw new ApiError(409, 'NATIONAL_ID_TAKEN',
-        'يوجد سجل مرتبط بهذا الرقم الوطني. إذا كنت تعتقد أن هذا خطأ، يرجى التواصل مع إدارة المنصة لتسوية الحالة.',
-        { nationalId: 'الرقم الوطني مسجّل مسبقًا' });
+      throw new ApiError(409, 'REGISTRATION_UNAVAILABLE', 'تعذر إنشاء الحساب بهذه البيانات. تحقق من البيانات أو تواصل مع الإدارة.');
     }
 
     const passwordHash = await hashPassword(data.password);
@@ -96,6 +92,11 @@ export async function POST(request: Request) {
       },
     });
   } catch (error) {
+    const databaseError = error instanceof Error ? error as Error & { cause?: { code?: string; message?: string } } : null;
+    if (databaseError && (databaseError.cause?.code === '23505'
+      || /duplicate key|unique constraint/i.test(`${databaseError.message} ${databaseError.cause?.message ?? ''}`))) {
+      return fail(409, 'تعذر إنشاء الحساب بهذه البيانات. تحقق من البيانات أو تواصل مع الإدارة.', 'REGISTRATION_UNAVAILABLE');
+    }
     return handleError(error);
   }
 }

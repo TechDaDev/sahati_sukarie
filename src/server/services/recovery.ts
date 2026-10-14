@@ -12,9 +12,9 @@
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { db } from '../db';
 import {
-  auditLogs, passwordRecoveryRequests, passwordRecoveryTokens, patientProfiles, users,
+  auditLogs, passwordRecoveryRequests, passwordRecoveryTokens, patientProfiles, sessions, users,
 } from '../db/schema';
-import { ApiError, hashPassword, revokeAllUserSessions, writeAudit } from '../auth/session';
+import { ApiError, hashPassword, writeAudit } from '../auth/session';
 import { randomRecoveryCode, sha256Hex } from '../lib/crypto';
 
 export const RECOVERY_TOKEN_TTL_MINUTES = 15;
@@ -244,46 +244,43 @@ export async function redeemRecoveryCode(args: {
   if (!user) throw new ApiError(400, 'INVALID_CODE', invalidMessage);
 
   // أحدث رمز غير مستخدم مرتبط بطلب لهذا المستخدم
-  const rows = await db.select({ token: passwordRecoveryTokens, request: passwordRecoveryRequests })
-    .from(passwordRecoveryTokens)
-    .innerJoin(passwordRecoveryRequests, eq(passwordRecoveryRequests.id, passwordRecoveryTokens.requestId))
-    .where(and(eq(passwordRecoveryRequests.patientUserId, user.id), isNull(passwordRecoveryTokens.usedAt)))
-    .orderBy(desc(passwordRecoveryTokens.createdAt))
-    .limit(1);
-
-  const row = rows[0];
-  if (!row) throw new ApiError(400, 'INVALID_CODE', invalidMessage);
-
-  const token = row.token;
-
-  if (token.attemptCount >= token.maxAttempts) {
-    await db.update(passwordRecoveryTokens).set({ usedAt: new Date() }).where(eq(passwordRecoveryTokens.id, token.id));
-    await db.update(passwordRecoveryRequests).set({ status: 'EXPIRED' }).where(eq(passwordRecoveryRequests.id, row.request.id));
-    throw new ApiError(429, 'TOO_MANY_ATTEMPTS', 'تم تجاوز عدد المحاولات المسموح بها لهذا الرمز. يرجى طلب رمز جديد.');
-  }
-
-  if (token.expiresAt <= new Date()) {
-    await db.update(passwordRecoveryTokens).set({ usedAt: new Date() }).where(eq(passwordRecoveryTokens.id, token.id));
-    await db.update(passwordRecoveryRequests).set({ status: 'EXPIRED' }).where(eq(passwordRecoveryRequests.id, row.request.id));
-    throw new ApiError(400, 'CODE_EXPIRED', 'انتهت صلاحية الرمز (15 دقيقة). يرجى طلب رمز استعادة جديد.');
-  }
-
   const candidate = sha256Hex(args.code.trim());
-  if (candidate !== token.tokenHash) {
-    const attempts = token.attemptCount + 1;
-    await db.update(passwordRecoveryTokens).set({
-      attemptCount: attempts,
-      usedAt: attempts >= token.maxAttempts ? new Date() : null,
-    }).where(eq(passwordRecoveryTokens.id, token.id));
-    await writeAudit({
-      actorUserId: user.id, actorRole: 'SYSTEM', action: 'RECOVERY_CODE_FAILED',
-      targetType: 'password_recovery_request', targetId: row.request.id,
-      metadata: { attempts }, ip: args.ip,
-    });
-    throw new ApiError(400, 'INVALID_CODE', invalidMessage);
-  }
+  const result = await db.transaction(async (tx) => {
+    const rows = await tx.select({ token: passwordRecoveryTokens, request: passwordRecoveryRequests })
+      .from(passwordRecoveryTokens)
+      .innerJoin(passwordRecoveryRequests, eq(passwordRecoveryRequests.id, passwordRecoveryTokens.requestId))
+      .where(and(eq(passwordRecoveryRequests.patientUserId, user.id), isNull(passwordRecoveryTokens.usedAt)))
+      .orderBy(desc(passwordRecoveryTokens.createdAt))
+      .limit(1)
+      .for('update');
+    const row = rows[0];
+    if (!row) return { status: 'invalid' as const };
+    const { token, request } = row;
+    if (request.status !== 'VERIFIED') return { status: 'invalid' as const };
+    const now = new Date();
+    if (token.attemptCount >= token.maxAttempts || token.expiresAt <= now) {
+      await tx.update(passwordRecoveryTokens).set({ usedAt: now })
+        .where(and(eq(passwordRecoveryTokens.id, token.id), isNull(passwordRecoveryTokens.usedAt)));
+      await tx.update(passwordRecoveryRequests).set({ status: 'EXPIRED' })
+        .where(eq(passwordRecoveryRequests.id, request.id));
+      return { status: token.attemptCount >= token.maxAttempts ? 'locked' as const : 'expired' as const, requestId: request.id };
+    }
 
-  await db.transaction(async (tx) => {
+    if (candidate !== token.tokenHash) {
+      const [updated] = await tx.update(passwordRecoveryTokens).set({
+        attemptCount: sql`LEAST(${passwordRecoveryTokens.attemptCount} + 1, ${passwordRecoveryTokens.maxAttempts})`,
+        usedAt: sql`CASE WHEN ${passwordRecoveryTokens.attemptCount} + 1 >= ${passwordRecoveryTokens.maxAttempts} THEN ${now}::timestamptz ELSE NULL::timestamptz END`,
+      }).where(and(eq(passwordRecoveryTokens.id, token.id), isNull(passwordRecoveryTokens.usedAt)))
+        .returning({ attemptCount: passwordRecoveryTokens.attemptCount });
+      return updated
+        ? { status: 'invalid' as const, requestId: request.id, attempts: updated.attemptCount }
+        : { status: 'invalid' as const };
+    }
+
+    const [consumed] = await tx.update(passwordRecoveryTokens).set({ usedAt: now })
+      .where(and(eq(passwordRecoveryTokens.id, token.id), isNull(passwordRecoveryTokens.usedAt)))
+      .returning({ id: passwordRecoveryTokens.id });
+    if (!consumed) return { status: 'invalid' as const };
     await tx.update(users).set({
       passwordHash: await hashPassword(args.newPassword),
       passwordChangedAt: new Date(),
@@ -292,20 +289,27 @@ export async function redeemRecoveryCode(args: {
       lockedUntil: null,
       updatedAt: new Date(),
     }).where(eq(users.id, user.id));
-
-    // الرمز صالح لمرة واحدة فقط
-    await tx.update(passwordRecoveryTokens).set({ usedAt: new Date() }).where(eq(passwordRecoveryTokens.id, token.id));
-
-    await tx.update(passwordRecoveryRequests).set({ status: 'COMPLETED', completedAt: new Date() })
-      .where(eq(passwordRecoveryRequests.id, row.request.id));
+    await tx.update(passwordRecoveryRequests).set({ status: 'COMPLETED', completedAt: now })
+      .where(eq(passwordRecoveryRequests.id, request.id));
+    await tx.update(sessions).set({ revokedAt: now })
+      .where(and(eq(sessions.userId, user.id), isNull(sessions.revokedAt)));
+    return { status: 'success' as const, requestId: request.id };
   });
 
-  // إلغاء جميع الجلسات القائمة بعد تغيير كلمة المرور
-  await revokeAllUserSessions(user.id);
+  if (result.status === 'locked') throw new ApiError(429, 'TOO_MANY_ATTEMPTS', 'تم تجاوز عدد المحاولات المسموح بها لهذا الرمز. يرجى طلب رمز جديد.');
+  if (result.status === 'expired') throw new ApiError(400, 'CODE_EXPIRED', 'انتهت صلاحية الرمز (15 دقيقة). يرجى طلب رمز استعادة جديد.');
+  if (result.status !== 'success') {
+    if (result.requestId && result.attempts) {
+      await writeAudit({ actorUserId: user.id, actorRole: 'SYSTEM', action: 'RECOVERY_CODE_FAILED',
+        targetType: 'password_recovery_request', targetId: result.requestId,
+        metadata: { attempts: result.attempts }, ip: args.ip });
+    }
+    throw new ApiError(400, 'INVALID_CODE', invalidMessage);
+  }
 
   await writeAudit({
     actorUserId: user.id, actorRole: 'PATIENT', action: 'PASSWORD_RESET_VIA_RECOVERY_CODE',
-    targetType: 'password_recovery_request', targetId: row.request.id,
+    targetType: 'password_recovery_request', targetId: result.requestId,
     metadata: { sessionsRevoked: true }, ip: args.ip,
   });
 }

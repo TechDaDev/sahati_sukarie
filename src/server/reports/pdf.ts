@@ -185,6 +185,7 @@ function buildHtml(data: ReportData, opts: PdfOptions, fonts: { regular: string;
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; font-src data:; style-src 'unsafe-inline' data:;" />
 <style>
   @font-face { font-family: 'Cairo'; src: url('${fonts.regular}') format('truetype'); font-weight: 400; }
   @font-face { font-family: 'Cairo'; src: url('${fonts.semibold}') format('truetype'); font-weight: 600; }
@@ -335,7 +336,7 @@ export async function renderHealthReportPdf(data: ReportData, opts: PdfOptions):
   const browser = await puppeteer.launch({
     executablePath,
     headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--font-render-hinting=none'],
+    args: ['--disable-dev-shm-usage', '--font-render-hinting=none'],
   });
   try {
     const page = await browser.newPage();

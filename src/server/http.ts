@@ -43,9 +43,35 @@ export function handleError(error: unknown): NextResponse<ApiFailure> {
 /** قراءة جسم الطلب والتحقق منه بمخطط Zod */
 export async function parseBody<T extends z.ZodTypeAny>(request: Request, schema: T): Promise<z.infer<T>> {
   let json: unknown;
+  const contentLength = Number(request.headers.get('content-length'));
+  if (Number.isFinite(contentLength) && contentLength > MAX_JSON_BODY_BYTES) {
+    throw new ApiError(413, 'PAYLOAD_TOO_LARGE', 'حجم الطلب أكبر من الحد المسموح.');
+  }
+  const contentType = request.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase();
+  if (contentType !== 'application/json') {
+    throw new ApiError(415, 'UNSUPPORTED_MEDIA_TYPE', 'نوع محتوى الطلب غير مدعوم.');
+  }
   try {
-    json = await request.json();
-  } catch {
+    if (!request.body) throw new Error('Missing request body');
+    const reader = request.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > MAX_JSON_BODY_BYTES) {
+        await reader.cancel();
+        throw new ApiError(413, 'PAYLOAD_TOO_LARGE', 'حجم الطلب أكبر من الحد المسموح.');
+      }
+      chunks.push(value);
+    }
+    const body = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.byteLength; }
+    json = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(body));
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
     throw new ApiError(400, 'INVALID_JSON', 'صيغة الطلب غير صحيحة.');
   }
   const result = schema.safeParse(json);
@@ -72,3 +98,4 @@ export function parseQuery<T extends z.ZodTypeAny>(request: Request, schema: T):
 export { guard };
 
 export const noStore = { 'Cache-Control': 'no-store, max-age=0' };
+const MAX_JSON_BODY_BYTES = 1024 * 1024;
