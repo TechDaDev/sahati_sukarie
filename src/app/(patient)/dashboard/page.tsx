@@ -4,17 +4,10 @@
  */
 import Link from 'next/link';
 import type { Metadata } from 'next';
-import { and, desc, eq, gte, sql } from 'drizzle-orm';
-import { db } from '@/server/db';
-import {
-  activityRecords, glucoseReadings, labResults, mealRecords, sleepRecords,
-  symptomRecords, weightRecords,
-} from '@/server/db/schema';
 import { requirePatientPage } from '@/server/page-guards';
-import { getProfileCompletion, getLatestGlucose } from '@/server/services/patient';
-import { latestAdministration, listAdministrations, listMedications } from '@/server/services/records';
+import { getPatientDashboard } from '@/server/services/dashboard';
 import {
-  formatDate, formatDateTime, formatDuration, formatGlucose, formatNumber, formatTime, todayISO,
+  formatDate, formatDateTime, formatDuration, formatGlucose, formatNumber, formatTime,
 } from '@/lib/format';
 import { LABELS, labelOf } from '@/lib/labels';
 import { Alert, Badge, Card, EmptyState, Icons, SectionTitle, StatCard } from '@/components/ui';
@@ -27,72 +20,11 @@ export const dynamic = 'force-dynamic';
 
 export default async function DashboardPage() {
   const ctx = await requirePatientPage();
-  const today = todayISO(ctx.timezone);
-  // حدود اليوم تُحسب بتوقيت المستخدم ثم تُحوَّل إلى UTC للاستعلام
-  // نطاق اليوم بتوقيت المستخدم: نحوّل بداية اليوم المحلية إلى UTC
-  const { localInputToUtc } = await import('@/lib/format');
-  const dayFrom = localInputToUtc(today, '00:00', ctx.timezone);
-  const dayTo = new Date(dayFrom.getTime() + 86_400_000);
-  const trendFrom = new Date(dayTo.getTime() - 14 * 86_400_000);
-
-  const [
-    latestGlucose, todayGlucoseCount, lastAdministration, todayActivities, todayMeals,
-    lastSleep, todaySymptoms, recentGlucose, latestWeight, latestHba1c, completion, activeMedications,
-    recentAdministrations, recentMeals,
-  ] = await Promise.all([
-    getLatestGlucose(ctx.profileId),
-    db.select({ c: sql<number>`count(*)` }).from(glucoseReadings)
-      .where(and(eq(glucoseReadings.patientId, ctx.profileId),
-        sql`${glucoseReadings.measurementDatetime} >= ${dayFrom}`,
-        sql`${glucoseReadings.measurementDatetime} < ${dayTo}`)),
-    latestAdministration(ctx.profileId),
-    db.select().from(activityRecords)
-      .where(and(eq(activityRecords.patientId, ctx.profileId),
-        sql`${activityRecords.activityDatetime} >= ${dayFrom}`,
-        sql`${activityRecords.activityDatetime} < ${dayTo}`))
-      .orderBy(desc(activityRecords.activityDatetime)),
-    db.select({ c: sql<number>`count(*)` }).from(mealRecords)
-      .where(and(eq(mealRecords.patientId, ctx.profileId),
-        sql`${mealRecords.mealDatetime} >= ${dayFrom}`,
-        sql`${mealRecords.mealDatetime} < ${dayTo}`)),
-    db.select().from(sleepRecords)
-      .where(and(eq(sleepRecords.patientId, ctx.profileId),
-        gte(sleepRecords.sleepDate, new Date(dayTo.getTime() - 3 * 86_400_000).toISOString().slice(0, 10))))
-      .orderBy(desc(sleepRecords.sleepDate)).limit(1),
-    db.select().from(symptomRecords)
-      .where(and(eq(symptomRecords.patientId, ctx.profileId),
-        sql`${symptomRecords.symptomDatetime} >= ${dayFrom}`,
-        sql`${symptomRecords.symptomDatetime} < ${dayTo}`)),
-    db.select().from(glucoseReadings)
-      .where(and(eq(glucoseReadings.patientId, ctx.profileId),
-        gte(glucoseReadings.measurementDatetime, trendFrom)))
-      .orderBy(glucoseReadings.measurementDatetime),
-    db.select().from(weightRecords).where(eq(weightRecords.patientId, ctx.profileId))
-      .orderBy(desc(weightRecords.measurementDate)).limit(1),
-    db.select().from(labResults)
-      .where(and(eq(labResults.patientId, ctx.profileId), eq(labResults.testType, 'HBA1C')))
-      .orderBy(desc(labResults.testDate)).limit(1),
-    getProfileCompletion(ctx.profileId),
-    listMedications(ctx.profileId, 'ACTIVE'),
-    listAdministrations(ctx.profileId, { from: trendFrom.toISOString().slice(0, 10), tz: ctx.timezone }),
-    db.select().from(mealRecords)
-      .where(and(eq(mealRecords.patientId, ctx.profileId),
-        gte(mealRecords.mealDatetime, trendFrom)))
-      .orderBy(desc(mealRecords.mealDatetime)).limit(5),
-  ]);
-
-  const todayReadings = Number(todayGlucoseCount[0]?.c ?? 0);
-  const mealsToday = Number(todayMeals[0]?.c ?? 0);
-  const activityMinutes = todayActivities.reduce((sum, a) => sum + a.durationMinutes, 0);
+  const { latestGlucose, todayReadings, lastAdministration, todayActivities, mealsToday, lastSleep, todaySymptoms,
+    recentGlucose, latestWeight, latestHba1c, completion, activeMedications, recentAdministrations, recentMeals,
+    activityMinutes, trendData } = await getPatientDashboard(ctx.profileId, ctx.timezone, ctx.preferredUnit);
   const infoMessage = latestGlucose ? glucoseInfoMessage(Number(latestGlucose.standardizedValueMgdl), ctx.numeralSystem) : null;
   const showOnboarding = completion.percent < 100;
-
-  const trendData = recentGlucose.map((r) => ({
-    at: r.measurementDatetime.toISOString(),
-    value: ctx.preferredUnit === 'MG_DL'
-      ? Number(r.standardizedValueMgdl)
-      : Number(r.standardizedValueMgdl) / 18.0182,
-  }));
 
   return (
     <div className="space-y-5">

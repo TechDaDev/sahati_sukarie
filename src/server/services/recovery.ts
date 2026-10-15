@@ -12,7 +12,7 @@
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { db } from '../db';
 import {
-  auditLogs, passwordRecoveryRequests, passwordRecoveryTokens, patientProfiles, sessions, users,
+  auditLogs, mobileSessions, passwordRecoveryRequests, passwordRecoveryTokens, patientProfiles, sessions, users,
 } from '../db/schema';
 import { ApiError, hashPassword, writeAudit } from '../auth/session';
 import { randomRecoveryCode, sha256Hex } from '../lib/crypto';
@@ -293,6 +293,8 @@ export async function redeemRecoveryCode(args: {
       .where(eq(passwordRecoveryRequests.id, request.id));
     await tx.update(sessions).set({ revokedAt: now })
       .where(and(eq(sessions.userId, user.id), isNull(sessions.revokedAt)));
+    await tx.update(mobileSessions).set({ revokedAt: now, revocationReason: 'password_recovered' })
+      .where(and(eq(mobileSessions.userId, user.id), isNull(mobileSessions.revokedAt)));
     return { status: 'success' as const, requestId: request.id };
   });
 

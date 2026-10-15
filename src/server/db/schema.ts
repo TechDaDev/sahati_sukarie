@@ -126,6 +126,40 @@ export const sessions = pgTable('sessions', {
   revokedAt: timestamp('revoked_at', { withTimezone: true }),
 }, (t) => ({ userIdx: index('sessions_user_idx').on(t.userId) }));
 
+/** Mobile device families. Tokens are represented only by SHA-256 hashes. */
+export const mobileSessions = pgTable('mobile_sessions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  deviceLabel: varchar('device_label', { length: 120 }),
+  accessTokenHash: varchar('access_token_hash', { length: 64 }).notNull().unique(),
+  accessExpiresAt: timestamp('access_expires_at', { withTimezone: true }).notNull(),
+  refreshExpiresAt: timestamp('refresh_expires_at', { withTimezone: true }).notNull(),
+  ipAddress: text('ip_address'),
+  userAgent: varchar('user_agent', { length: 400 }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }).notNull().defaultNow(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  revocationReason: varchar('revocation_reason', { length: 40 }),
+}, (t) => ({
+  userIdx: index('mobile_sessions_user_idx').on(t.userId, t.revokedAt),
+  expiryIdx: index('mobile_sessions_expiry_idx').on(t.refreshExpiresAt),
+}));
+
+/** Refresh-token history enables one-time use and replay detection without plaintext tokens. */
+export const mobileRefreshTokens = pgTable('mobile_refresh_tokens', {
+  tokenHash: varchar('token_hash', { length: 64 }).primaryKey(),
+  mobileSessionId: uuid('mobile_session_id').notNull().references(() => mobileSessions.id, { onDelete: 'cascade' }),
+  generation: integer('generation').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  usedAt: timestamp('used_at', { withTimezone: true }),
+  rotationRequestId: uuid('rotation_request_id'),
+}, (t) => ({
+  sessionIdx: index('mobile_refresh_session_idx').on(t.mobileSessionId, t.generation),
+  expiryIdx: index('mobile_refresh_expiry_idx').on(t.expiresAt),
+  requestUnique: uniqueIndex('mobile_refresh_request_unique').on(t.mobileSessionId, t.rotationRequestId),
+}));
+
 /* --------------------------------------------------------------- patients */
 
 export const patientProfiles = pgTable('patient_profiles', {

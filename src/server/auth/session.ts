@@ -2,6 +2,7 @@
  * وحدة المصادقة: تجزئة كلمات المرور، الجلسات، حماية CSRF، وتحديد المعدل.
  */
 import bcrypt from 'bcryptjs';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { isIP } from 'node:net';
 import { cookies, headers } from 'next/headers';
@@ -43,6 +44,13 @@ export type SessionRecord = {
   csrfToken: string;
   user: SessionUser;
 };
+
+const requestSession = new AsyncLocalStorage<SessionRecord>();
+
+/** Run a shared patient handler under a validated bearer session. */
+export function withMobileSession<T>(session: SessionRecord, work: () => Promise<T>): Promise<T> {
+  return requestSession.run(session, work);
+}
 
 /* --------------------------------------------------------------- إنشاء جلسة */
 
@@ -215,7 +223,7 @@ export class ApiError extends Error {
 
 /** المصادقة الإلزامية لمستخدم مسجّل — تُرمي خطأ 401 عند الفشل */
 export async function requireSession(allowedRoles?: Array<'PATIENT' | 'ADMIN'>): Promise<SessionRecord> {
-  const session = await getCurrentSession();
+  const session = requestSession.getStore() ?? await getCurrentSession();
   if (!session) {
     throw new ApiError(401, 'UNAUTHENTICATED', 'يجب تسجيل الدخول للمتابعة.');
   }
@@ -234,7 +242,7 @@ export async function guard(
   options: { roles?: Array<'PATIENT' | 'ADMIN'>; csrf?: boolean } = {},
 ): Promise<{ session: SessionRecord; ip: string }> {
   const session = await requireSession(options.roles);
-  if (options.csrf !== false) {
+  if (options.csrf !== false && !requestSession.getStore()) {
     await assertCsrf(request, session);
   }
   return { session, ip: clientIp(request) };

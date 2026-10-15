@@ -2,8 +2,9 @@
  * POST /api/auth/change-password — تغيير كلمة المرور للمستخدم المسجّل.
  * يُلغي جميع الجلسات الأخرى، ويرفع شرط تغيير كلمة المرور الأولية للمدير.
  */
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { db } from '@/server/db';
+import { mobileSessions } from '@/server/db/schema';
 import { users } from '@/server/db/schema';
 import {
   ApiError, assertRateLimit, guard, hashPassword, revokeAllUserSessions, verifyPassword, writeAudit,
@@ -38,6 +39,8 @@ export async function POST(request: Request) {
 
     // إلغاء الجلسات الأخرى (تُبقي الجلسة الحالية صالحة لتجربة سلسة)
     await revokeAllUserSessions(session.user.id, session.sessionId);
+    await db.update(mobileSessions).set({ revokedAt: new Date(), revocationReason: 'password_changed' })
+      .where(and(eq(mobileSessions.userId, session.user.id), isNull(mobileSessions.revokedAt)));
 
     await writeAudit({
       actorUserId: session.user.id, actorRole: session.user.role === 'ADMIN' ? 'ADMIN' : 'PATIENT',
