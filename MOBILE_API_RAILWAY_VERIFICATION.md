@@ -14,15 +14,30 @@ Verification date: 2026-10-15
 - Pre-deploy migration command: `npm run db:migrate`
 - Current live deployment before this change: `7b893b95-8d79-4721-9710-d40c809bcf27` (`SUCCESS`, 2026-10-14)
 
-The live service source is `TechDaDev/sahati_sukarie`, branch `main`. Railway readback showed no staged configuration. Existing service and database will be reused.
+The live service source is `TechDaDev/sahati_sukarie`, branch `main`. Existing service and database were reused. A pre-existing zero-change staged Railway patch remained untouched.
 
 ## New deployment
 
-Pending Git push and Railway rollout.
+Deployment: `46e5e9cb-3996-4c83-b22f-bff81590a04b` (`SUCCESS`, region `us-east4-eqdc4a`), commit `c126b81bebce398f3e5fcff05aa57b879ed8c402`.
+
+Railway ran the configured `npm run db:migrate` pre-deploy command before starting the app container. The deployment's `/api/health` health check passed.
 
 ## Smoke verification
 
-Pending new deployment. Required safe checks: `/api/health`, `/api/v1/config`, `/api/openapi.json`, unauthenticated patient endpoint, invalid bearer token, HTTPS domain, and website login page. Do not read production patient rows or use unapproved production credentials.
+All checks against `https://sahatisukarie.up.railway.app` passed:
+
+| Check | Result |
+|---|---|
+| `GET /api/health` | 200, `{"status":"ok"}`, `Cache-Control: no-store` |
+| `GET /api/v1/config` | 200, API v1 config, `Cache-Control: no-store` |
+| `GET /api/openapi.json` | 200, OpenAPI 3.1.0, `Cache-Control: no-store` |
+| `GET /api/v1/glucose` without credentials | 401 `UNAUTHENTICATED` |
+| `GET /api/v1/glucose` with invalid bearer | 401 `UNAUTHENTICATED` |
+| `GET /login` | 200 |
+| HTTP `/api/health` | 301 redirect to HTTPS |
+| HTTPS `/api/health` | 200, HSTS `max-age=31536000` |
+
+No production patient rows were read. No credentials were sent other than the deliberately invalid placeholder token.
 
 ## Authentication verification
 
@@ -30,4 +45,4 @@ Positive production mobile authentication is not verified. No controlled product
 
 ## Status
 
-Deployment and production smoke checks pending.
+**PASS WITH LIMITATIONS** — deployment and unauthenticated production checks passed. Positive production authentication and authenticated patient behavior remain unverified.

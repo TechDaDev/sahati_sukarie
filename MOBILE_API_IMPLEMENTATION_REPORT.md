@@ -35,17 +35,17 @@ Database: isolated PostgreSQL 16 cluster at `127.0.0.1:55432`, database named `s
 - `npm ci`: passed. npm reported 11 total development-inclusive advisories; `npm audit --omit=dev` reported 0 production dependency vulnerabilities.
 - `npm run typecheck`: passed after implementation changes.
 - `npm run build`: passed with a one-command `APP_URL=https://sahatisukarie.up.railway.app` override. The local `.env.local` `APP_URL` fails HTTPS URL validation; it was not changed.
-- `npm run test:security`: passed 13, failed 0, skipped 0 with `SECURITY_TEST_CHROMIUM_PATH=/usr/bin/google-chrome`. Includes existing security tests and new mobile/OpenAPI coverage.
+- `npm run test:security`: passed 13, failed 0, skipped 0 with `SECURITY_TEST_CHROMIUM_PATH=/usr/bin/google-chrome`. Includes existing security tests and new mobile/OpenAPI coverage, including PDF rendering.
 - Migration repeatability: passed; second `db:migrate` reported no new migrations.
-- Local HTTP smoke against production build and synthetic DB: health, config, OpenAPI, browser login, invalid bearer, unauthenticated medical route, and mixed-auth rejection returned expected statuses. Production API and authenticated patient flows are not yet verified; no production credentials or patient records were used.
+- Local HTTP smoke against production build and synthetic DB: health, config, OpenAPI, browser login, invalid bearer, unauthenticated medical route, and mixed-auth rejection returned expected statuses.
+- Railway deployment `46e5e9cb-3996-4c83-b22f-bff81590a04b` reached `SUCCESS` for commit `c126b81bebce398f3e5fcff05aa57b879ed8c402`; configured migration pre-deploy command ran and Railway `/api/health` check passed.
+- Public production smoke: health/config/OpenAPI/login returned 200; no-token and invalid-token medical requests returned 401; HTTP redirected to HTTPS and HTTPS returned HSTS. Positive authenticated production behavior remains unverified; no production credentials or patient records were used.
 
 ## Remaining limitations
 
 1. Full CRUD and report/PDF flows for every resource need more API-level integration tests, though v1 delegates writes to the tested browser handlers and existing ownership policy.
 2. OpenAPI body schemas should be generated from Zod or fully specified per route.
-3. PDF renderer integration remains skipped without a local Chromium executable.
-4. Railway deployment, production smoke checks, Git push, and deployment metadata are pending.
-5. Production positive mobile authentication is not verified because no controlled production test account was provided. Production patient records were not accessed.
+3. Production positive mobile authentication is not verified because no controlled production test account was provided. Production patient records were not accessed.
 
 ## Final status
 
