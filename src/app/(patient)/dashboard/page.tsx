@@ -11,7 +11,8 @@ import {
 } from '@/lib/format';
 import { LABELS, labelOf } from '@/lib/labels';
 import { Alert, Badge, Card, EmptyState, Icons, SectionTitle, StatCard } from '@/components/ui';
-import { GlucoseTrendChart, windowAverageDelta } from '@/components/charts';
+import { GlucoseTrendChart } from '@/components/charts';
+import { windowAverageDelta } from '@/lib/glucose-analysis';
 import { QuickActions } from '@/components/quick-actions';
 import { SAFETY_DISCLAIMER, glucoseInfoMessage } from '@/lib/safety';
 
