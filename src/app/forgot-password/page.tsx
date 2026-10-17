@@ -6,6 +6,7 @@ import { Alert } from '@/components/ui';
 import { ForgotPasswordForm } from './forgot-form';
 
 export const metadata: Metadata = { title: 'استعادة كلمة المرور' };
+export const dynamic = 'force-dynamic';
 
 export default function ForgotPasswordPage() {
   return (

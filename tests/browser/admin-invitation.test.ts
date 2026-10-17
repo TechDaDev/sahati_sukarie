@@ -262,6 +262,18 @@ test('administrator invitation fields hydrate, accept input, validate, and compl
 
     const unauthenticatedAdminApi = await fetch(`${baseUrl}/api/admin/users`);
     assert.equal(unauthenticatedAdminApi.status, 401, 'Unauthenticated visitor cannot access administrator API.');
+
+    await page.goto(`${baseUrl}/forgot-password`, { waitUntil: 'networkidle0' });
+    const recoveryNonces = await page.$$eval('script[src]', (scripts) => scripts.map((script) => (script as HTMLScriptElement).nonce));
+    assert.ok(recoveryNonces.length > 0 && recoveryNonces.every(Boolean), 'Forgot Password client scripts carry request CSP nonces.');
+    await page.waitForFunction(() => document.querySelector<HTMLInputElement>('#email') !== null);
+    await page.locator('#email').click();
+    await page.keyboard.type(`synthetic-recovery-${suffix}@example.invalid`);
+    const recoveryResponsePromise = page.waitForResponse((response) => response.url() === `${baseUrl}/api/forgot-password` && response.request().method() === 'POST');
+    await page.locator('button[type="submit"]').click();
+    const recoveryResponse = await recoveryResponsePromise;
+    assert.equal(recoveryResponse.status(), 200, 'Synthetic Forgot Password request receives the generic response.');
+    await page.waitForFunction(() => document.body.innerText.includes('تم استلام الطلب'), { timeout: 5_000 });
     assert.deepEqual(browserErrors, [], 'Browser reports no hydration or runtime errors.');
   } finally {
     await browser?.close();
