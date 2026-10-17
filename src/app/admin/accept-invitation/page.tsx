@@ -4,6 +4,7 @@ import { AuthCard } from '@/components/auth-card';
 import { AdminInvitationForm } from './invitation-form';
 
 export const metadata: Metadata = { title: 'إعداد حساب المدير' };
+export const dynamic = 'force-dynamic';
 
 export default function AcceptAdminInvitationPage() {
   return <AuthCard
