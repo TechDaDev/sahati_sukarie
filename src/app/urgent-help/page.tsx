@@ -11,7 +11,7 @@ export const metadata: Metadata = { title: 'المساعدة العاجلة' };
 
 export default function UrgentHelpPage() {
   return (
-    <div className="min-h-screen bg-canvas px-4 py-8">
+    <div dir="rtl" className="min-h-screen bg-canvas px-4 py-6 sm:py-8">
       <div className="mx-auto max-w-2xl">
         <Link href="/dashboard" className="text-sm font-semibold text-brand-600 hover:underline">← العودة إلى لوحة المتابعة</Link>
 
@@ -24,22 +24,21 @@ export default function UrgentHelpPage() {
           {URGENT_HELP_TEXT}
         </Alert>
 
-        <Card className="mt-4">
-          <h2 className="text-base">أرقام الاتصال الرسمية</h2>
-          <p className="mt-1 text-xs text-ink-muted">
-            تأكد من الأرقام المحلية المعتمدة في محافظتك، فهي قابلة للتغيير.
-          </p>
-          <ul className="mt-3 space-y-2">
-            {EMERGENCY_CONTACTS.map((c) => (
-              <li key={c.label} className="flex items-center justify-between rounded-xl border border-brand-100 bg-brand-50/40 px-3.5 py-2.5">
-                <span>
-                  <span className="block text-sm font-semibold text-ink">{c.label}</span>
-                  <span className="block text-xs text-ink-muted">{c.note}</span>
-                </span>
-                <a href={`tel:${c.value}`} className="num text-xl font-bold text-alert">{c.value}</a>
-              </li>
-            ))}
-          </ul>
+        <Card className="mt-4 border-red-200 bg-white p-5 text-center sm:p-7">
+          {EMERGENCY_CONTACTS.map((contact) => (
+            <section key={contact.value} aria-labelledby="emergency-number-title">
+              <h2 id="emergency-number-title" className="text-base font-semibold text-ink">{contact.label}</h2>
+              <p className="mt-1 text-sm leading-6 text-ink-muted">{contact.note}</p>
+              <p dir="ltr" className="num my-2 text-5xl font-extrabold tracking-wide text-alert sm:text-6xl">{contact.value}</p>
+              <p className="text-sm font-semibold text-ink-soft">{contact.availability} · {contact.cost}</p>
+              <a
+                href={`tel:${contact.value}`}
+                className="mt-5 inline-flex min-h-14 w-full items-center justify-center rounded-xl bg-alert px-5 py-3 text-base font-bold text-white shadow-sm transition hover:bg-red-700 focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-red-300 sm:w-auto sm:min-w-72"
+              >
+                الاتصال بالطوارئ 911
+              </a>
+            </section>
+          ))}
         </Card>
 
         <Card className="mt-4">
