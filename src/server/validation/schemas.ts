@@ -327,6 +327,29 @@ export const forgotPasswordSchema = z.object({
   email: emailSchema,
 });
 
+export const emailOtpSchema = z.object({
+  email: emailSchema,
+  code: z.string().trim().regex(/^\d{6}$/, 'الرمز يجب أن يتكوّن من ستة أرقام'),
+});
+
+export const emailOtpResendSchema = z.object({ email: emailSchema });
+
+export const completeEmailPasswordResetSchema = z.object({
+  resetAuthorization: z.string().min(32).max(128),
+  newPassword: passwordSchema,
+  confirmPassword: z.string(),
+}).refine((data) => data.newPassword === data.confirmPassword, {
+  message: 'كلمتا المرور غير متطابقتين', path: ['confirmPassword'],
+});
+
+export const acceptAdminInvitationSchema = z.object({
+  token: z.string().min(43).max(128),
+  newPassword: passwordSchema,
+  confirmPassword: z.string(),
+}).refine((data) => data.newPassword === data.confirmPassword, {
+  message: 'كلمتا المرور غير متطابقتين', path: ['confirmPassword'],
+});
+
 export const recoveryCodeSchema = z.object({
   email: emailSchema,
   code: z.string().trim().regex(/^\d{6,10}$/, 'الرمز يجب أن يكون أرقامًا فقط'),

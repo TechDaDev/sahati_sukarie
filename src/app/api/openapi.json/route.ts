@@ -5,7 +5,13 @@ const success = { description: 'Success', content: { 'application/json': { schem
 const error = { description: 'Error', content: { 'application/json': { schema: { type: 'object', required: ['ok', 'error', 'code'], properties: { ok: { type: 'boolean', enum: [false] }, error: { type: 'string' }, code: { type: 'string' }, fields: { type: 'object', additionalProperties: { type: 'string' } } } } } } };
 const protectedResponses = { '200': success, '400': error, '401': error, '403': error, '404': error, '409': error, '429': error };
 const patient = { security: [{ bearerAuth: [] }], 'x-required-role': 'PATIENT', responses: protectedResponses };
-const publicPost = { requestBody: jsonBody, responses: { '200': success, '201': success, '400': error, '401': error, '409': error, '429': error } };
+const publicPost = { requestBody: jsonBody, responses: { '200': success, '201': success, '400': error, '401': error, '409': error, '429': error, '503': error } };
+const emailBody = (properties: Record<string, unknown>, required: string[]) => ({ required: true, content: { 'application/json': { schema: { type: 'object', required, properties, additionalProperties: false } } } });
+const emailField = { type: 'string', format: 'email', maxLength: 254 };
+const otpField = { type: 'string', pattern: '^\\d{6}$', minLength: 6, maxLength: 6 };
+const emailOtpBody = emailBody({ email: emailField, code: otpField }, ['email', 'code']);
+const emailOnlyBody = emailBody({ email: emailField }, ['email']);
+const resetCompleteBody = emailBody({ resetAuthorization: { type: 'string', minLength: 32, maxLength: 128 }, newPassword: { type: 'string', minLength: 10, maxLength: 128 }, confirmPassword: { type: 'string', minLength: 10, maxLength: 128 } }, ['resetAuthorization', 'newPassword', 'confirmPassword']);
 const op = (summary: string, options: Record<string, unknown> = {}) => ({ summary, ...options });
 const pageParams = [
   { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 50 } },
@@ -24,11 +30,15 @@ const spec = {
   components: { securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'Opaque access token' } }, schemas: { Error: { type: 'object', required: ['ok', 'error', 'code'], properties: { ok: { type: 'boolean' }, error: { type: 'string' }, code: { type: 'string' }, fields: { type: 'object', additionalProperties: { type: 'string' } } } }, Page: { type: 'object', properties: { items: { type: 'array', items: { type: 'object' } }, pagination: { type: 'object', properties: { limit: { type: 'integer' }, hasMore: { type: 'boolean' }, nextCursor: { type: ['string', 'null'] } } } } } } },
   paths: {
     '/api/v1/config': { get: op('Read public app capabilities', { tags: ['Config'], responses: { '200': success } }) },
-    '/api/v1/auth/register': { post: op('Register patient account', { tags: ['Auth'], ...publicPost }) },
+    '/api/v1/auth/register': { post: op('Register patient account; returns activationRequired without creating a session when email activation is enabled', { tags: ['Auth'], ...publicPost }) },
     '/api/v1/auth/login': { post: op('Create patient device session', { tags: ['Auth'], ...publicPost }) },
     '/api/v1/auth/refresh': { post: op('Rotate refresh token; send X-Refresh-Request-ID UUID', { tags: ['Auth'], ...publicPost }) },
-    '/api/v1/auth/forgot-password': { post: op('Create recovery request', { tags: ['Auth'], ...publicPost }) },
-    '/api/v1/auth/redeem-recovery': { post: op('Redeem recovery code', { tags: ['Auth'], ...publicPost }) },
+    '/api/v1/auth/activation/verify': { post: op('Verify activation OTP; does not create an authenticated session', { tags: ['Auth'], requestBody: emailOtpBody, responses: { '200': success, '400': error, '429': error } }) },
+    '/api/v1/auth/activation/resend': { post: op('Resend activation OTP with an anti-enumeration response', { tags: ['Auth'], requestBody: emailOnlyBody, responses: { '200': success, '400': error, '429': error } }) },
+    '/api/v1/auth/forgot-password': { post: op('Request email password-reset OTP; response does not reveal account existence', { tags: ['Auth'], requestBody: emailOnlyBody, responses: { '200': success, '400': error, '429': error } }) },
+    '/api/v1/auth/password-reset/verify': { post: op('Verify reset OTP and issue a short-lived single-use reset authorization', { tags: ['Auth'], requestBody: emailOtpBody, responses: { '200': success, '400': error, '429': error } }) },
+    '/api/v1/auth/password-reset/complete': { post: op('Set a new password and revoke browser and mobile sessions', { tags: ['Auth'], requestBody: resetCompleteBody, responses: { '200': success, '400': error, '429': error } }) },
+    '/api/v1/auth/redeem-recovery': { post: op('Retired insecure administrator recovery endpoint', { tags: ['Auth'], ...publicPost, responses: { '410': error } }) },
     '/api/v1/auth/me': { get: op('Read authenticated patient identity', { tags: ['Auth'], ...patient }) },
     '/api/v1/auth/logout': { post: op('Revoke current device session', { tags: ['Auth'], ...patient }) },
     '/api/v1/auth/logout-all': { post: op('Revoke all patient sessions', { tags: ['Auth'], ...patient }) },

@@ -3,9 +3,11 @@ import { db } from '@/server/db';
 import { mobileSessions, patientProfiles, sessions, users } from '@/server/db/schema';
 import { ApiError, assertRateLimit, clientIp, hashPassword, verifyPassword, withMobileSession, writeAudit } from '@/server/auth/session';
 import { blindIndex, encryptField } from '@/server/lib/crypto';
-import { handleError, noStore, ok, parseBody } from '@/server/http';
-import { changePasswordSchema, loginSchema, registerSchema } from '@/server/validation/schemas';
+import { fail, handleError, noStore, ok, parseBody } from '@/server/http';
+import { changePasswordSchema, completeEmailPasswordResetSchema, emailOtpResendSchema, emailOtpSchema, loginSchema, registerSchema } from '@/server/validation/schemas';
 import { authenticateBearer, loginMobile, refreshMobile, revokeMobileSession } from '@/server/services/mobile-auth';
+import { completePasswordReset, requestActivationOtp, sendEmailOtp, verifyEmailOtp } from '@/server/services/email-otp';
+import { env } from '@/server/env';
 import { dispatchPatientRoute } from '@/server/mobile/dispatch';
 import { getProfileByUserId, getProfileSummary } from '@/server/services/patient';
 import { getPatientDashboard } from '@/server/services/dashboard';
@@ -17,7 +19,8 @@ async function run(request: Request, context: Context): Promise<Response> {
     if (['token', 'access_token', 'refresh_token'].some((key) => query.has(key))) throw new ApiError(400, 'TOKEN_IN_URL', 'لا تُرسل الرموز ضمن عنوان الطلب.');
     const { path } = await context.params;
     if (path[0] === 'config' && path.length === 1 && request.method === 'GET') {
-      return ok({ apiVersion: 'v1', supportedGlucoseUnits: ['MG_DL', 'MMOL_L'], supportedLanguages: ['ar-IQ'], defaultTimezone: 'Asia/Baghdad', capabilities: ['patient-profile', 'dashboard', 'glucose', 'medications', 'daily-records', 'reports', 'contact-settings'] }, { headers: noStore });
+      const config = env();
+      return ok({ apiVersion: 'v1', supportedGlucoseUnits: ['MG_DL', 'MMOL_L'], supportedLanguages: ['ar-IQ'], defaultTimezone: 'Asia/Baghdad', capabilities: ['patient-profile', 'dashboard', 'glucose', 'medications', 'daily-records', 'reports', 'contact-settings'], emailOtpEnabled: config.EMAIL_OTP_ENABLED, activationRequired: config.EMAIL_ACTIVATION_REQUIRED, passwordRecoveryEnabled: config.EMAIL_PASSWORD_RECOVERY_ENABLED }, { headers: noStore });
     }
     if (path[0] === 'auth') return await authRoute(request, path.slice(1));
 
@@ -55,13 +58,38 @@ async function authRoute(request: Request, path: string[]): Promise<Response> {
     if (existing || existingId) throw new ApiError(409, 'REGISTRATION_UNAVAILABLE', 'تعذر إنشاء الحساب بهذه البيانات.');
     const passwordHash = await hashPassword(data.password);
     const created = await db.transaction(async (tx) => {
-      const [user] = await tx.insert(users).values({ email, passwordHash, role: 'PATIENT', status: 'ACTIVE' }).returning();
+      const [user] = await tx.insert(users).values({ email, passwordHash, role: 'PATIENT', status: 'ACTIVE', emailActivationRequired: env().EMAIL_ACTIVATION_REQUIRED, emailActivationExemption: env().EMAIL_ACTIVATION_REQUIRED ? null : 'FEATURE_DISABLED' }).returning();
       const [profile] = await tx.insert(patientProfiles).values({ userId: user!.id, fullName: data.fullName, gender: data.gender, dateOfBirth: data.dateOfBirth, heightCm: String(data.heightCm), nationalIdProtected: encryptField(data.nationalId), nationalIdHash, nationalIdLast4: data.nationalId.slice(-4), phoneNumber: data.phone, phoneNorm: data.phone }).returning();
       return { user: user!, profile: profile! };
     });
     await writeAudit({ actorUserId: created.user.id, actorRole: 'PATIENT', action: 'ACCOUNT_REGISTERED', targetType: 'user', targetId: created.user.id, metadata: { emailVerified: false, channel: 'mobile' }, ip: clientIp(request) });
+    if (env().EMAIL_ACTIVATION_REQUIRED) {
+      await sendEmailOtp({ userId: created.user.id, purpose: 'ACCOUNT_ACTIVATION', ip: clientIp(request) });
+      await writeAudit({ actorUserId: created.user.id, actorRole: 'PATIENT', action: 'ACCOUNT_ACTIVATION_PENDING', targetType: 'user', targetId: created.user.id, ip: clientIp(request) });
+      return ok({ user: { id: created.user.id, email: created.user.email, role: created.user.role }, profileId: created.profile.id, activationRequired: true }, { status: 201, headers: noStore });
+    }
     const tokens = await loginMobile(email, data.password, { ip: clientIp(request), userAgent: request.headers.get('user-agent') });
     return ok({ ...tokens, profileId: created.profile.id, notices: { emailVerified: false, phoneVerified: false } }, { status: 201, headers: noStore });
+  }
+  if (endpoint === 'activation/verify' && request.method === 'POST') {
+    const data = await parseBody(request, emailOtpSchema);
+    await verifyEmailOtp({ ...data, purpose: 'ACCOUNT_ACTIVATION', ip: clientIp(request) });
+    return ok({ activated: true }, { headers: noStore });
+  }
+  if (endpoint === 'activation/resend' && request.method === 'POST') {
+    const data = await parseBody(request, emailOtpResendSchema);
+    try { await requestActivationOtp(data.email, clientIp(request)); } catch { /* Keep public responses uniform. */ }
+    return ok({ message: 'إذا كان الحساب مؤهلًا، فسيصل رمز التفعيل إلى البريد المسجّل. انتظر دقيقة قبل طلب رمز آخر.' }, { headers: noStore });
+  }
+  if (endpoint === 'password-reset/verify' && request.method === 'POST') {
+    const data = await parseBody(request, emailOtpSchema);
+    const result = await verifyEmailOtp({ ...data, purpose: 'PASSWORD_RESET', ip: clientIp(request) });
+    return ok({ resetAuthorization: result.resetAuthorization }, { headers: noStore });
+  }
+  if (endpoint === 'password-reset/complete' && request.method === 'POST') {
+    const data = await parseBody(request, completeEmailPasswordResetSchema);
+    await completePasswordReset({ authorization: data.resetAuthorization, newPassword: data.newPassword, ip: clientIp(request) });
+    return ok({ passwordReset: true, loginRequired: true }, { headers: noStore });
   }
   if (endpoint === 'refresh' && request.method === 'POST') {
     const z = await import('zod');
@@ -75,8 +103,7 @@ async function authRoute(request: Request, path: string[]): Promise<Response> {
     return withNoStore(await module.POST(request));
   }
   if (endpoint === 'redeem-recovery' && request.method === 'POST') {
-    const module = await import('../../redeem-recovery/route');
-    return withNoStore(await module.POST(request));
+    return withNoStore(fail(410, 'تم إيقاف رمز الاستعادة القديم. استخدم رمز البريد الإلكتروني.', 'RECOVERY_METHOD_RETIRED'));
   }
   const { session, mobileSessionId } = await authenticateBearer(request);
   if (endpoint === 'me' && request.method === 'GET') return ok({ user: session.user }, { headers: noStore });

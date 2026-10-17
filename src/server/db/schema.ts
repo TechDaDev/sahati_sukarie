@@ -91,6 +91,7 @@ export const recoveryStatusEnum = pgEnum('recovery_status', [
 ]);
 
 export const auditActorRoleEnum = pgEnum('audit_actor_role', ['PATIENT', 'ADMIN', 'SYSTEM']);
+export const emailOtpPurposeEnum = pgEnum('email_otp_purpose', ['ACCOUNT_ACTIVATION', 'PASSWORD_RESET']);
 
 /* ------------------------------------------------------------------ users */
 
@@ -100,6 +101,9 @@ export const users = pgTable('users', {
   passwordHash: text('password_hash').notNull(),
   role: userRoleEnum('role').notNull().default('PATIENT'),
   status: userStatusEnum('status').notNull().default('ACTIVE'),
+  emailActivationRequired: boolean('email_activation_required').notNull().default(false),
+  emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
+  emailActivationExemption: varchar('email_activation_exemption', { length: 32 }),
   mustChangePassword: boolean('must_change_password').notNull().default(false),
   passwordChangedAt: timestamp('password_changed_at', { withTimezone: true }),
   lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
@@ -396,6 +400,45 @@ export const passwordRecoveryTokens = pgTable('password_recovery_tokens', {
   createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({ requestIdx: index('recovery_token_request_idx').on(t.requestId), hashIdx: index('recovery_token_hash_idx').on(t.tokenHash) }));
+
+/* ----------------------------------------------- email OTP authentication */
+
+export const emailOtpChallenges = pgTable('email_otp_challenges', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  purpose: emailOtpPurposeEnum('purpose').notNull(),
+  codeHash: varchar('code_hash', { length: 64 }).notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  resendAvailableAt: timestamp('resend_available_at', { withTimezone: true }).notNull(),
+  attemptCount: integer('attempt_count').notNull().default(0),
+  consumedAt: timestamp('consumed_at', { withTimezone: true }),
+  deliveryStatus: varchar('delivery_status', { length: 24 }).notNull().default('PENDING'),
+  providerMessageId: text('provider_message_id'),
+  deliveryErrorCode: varchar('delivery_error_code', { length: 64 }),
+  ipHash: varchar('ip_hash', { length: 64 }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  userPurposeIdx: index('email_otp_user_purpose_idx').on(t.userId, t.purpose, t.createdAt),
+  expiryIdx: index('email_otp_expiry_idx').on(t.expiresAt),
+}));
+
+export const passwordResetAuthorizations = pgTable('password_reset_authorizations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  tokenHash: varchar('token_hash', { length: 64 }).notNull().unique(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  consumedAt: timestamp('consumed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({ userIdx: index('password_reset_authorization_user_idx').on(t.userId, t.createdAt) }));
+
+export const adminInvitations = pgTable('admin_invitations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  tokenHash: varchar('token_hash', { length: 64 }).notNull().unique(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  consumedAt: timestamp('consumed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({ userIdx: index('admin_invitation_user_idx').on(t.userId, t.createdAt) }));
 
 /* ------------------------------------------------------------------ audit */
 

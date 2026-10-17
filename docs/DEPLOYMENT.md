@@ -32,7 +32,7 @@ openssl rand -hex 32      # NATIONAL_ID_PEPPER
 قواعد إلزامية:
 
 - `FIELD_ENCRYPTION_KEY` **لا يُغيَّر** بعد إدخال بيانات مرضى (فقدانه يعني فقدان القدرة على فك تشفير الأرقام الوطنية).
-- `INITIAL_ADMIN_PASSWORD` كلمة مرور قوية فريدة؛ تُقرأ مرة واحدة عند إنشاء أول حساب مدير، ويُجبر المدير على تغييرها عند أول دخول.
+- `INITIAL_ADMIN_EMAIL` عنوان المدير الأول. `scripts/create-admin.ts` ينشئ دعوة إعداد HTTPS أحادية الاستخدام، ويحدد الرابط انتهاءً بعد 30 دقيقة. لا تضبط كلمة مرور أو ترسلها بالبريد.
 - لا تُعِد استخدام أسرار بيئة التطوير في الإنتاج.
 
 ---
@@ -46,7 +46,7 @@ bash scripts/setup-postgres.sh
 # تطبيق الترحيلات (idempotent — كل ملف يُطبَّق مرة واحدة ويُسجَّل في schema_migrations)
 npm run db:migrate
 
-# إنشاء أول حساب مدير من متغيرات البيئة
+# إنشاء أول مدير وإرسال دعوة إعداد آمنة إلى INITIAL_ADMIN_EMAIL
 npx tsx scripts/create-admin.ts
 ```
 
@@ -162,7 +162,7 @@ pg_restore --clean --if-exists --no-owner -d "$DATABASE_URL" backups/sahati-<UTC
 - [ ] HTTPS مفعّل، و`APP_URL` يبدأ بـ `https://`.
 - [ ] `SESSION_SECRET` / `FIELD_ENCRYPTION_KEY` / `NATIONAL_ID_PEPPER` قيم عشوائية جديدة وفريدة.
 - [ ] لا تُوجد كلمات مرور افتراضية أو عامة في الكود أو التوثيق.
-- [ ] `INITIAL_ADMIN_PASSWORD` قوية، وتم تغييرها عند أول دخول (`must_change_password`).
+- [ ] أُرسلت دعوة إعداد آمنة للمدير، وأُنشئت كلمة مرور قوية عبر HTTPS.
 - [ ] منافذ PostgreSQL غير مفتوحة على الإنترنت (تقتصر على 127.0.0.1).
 - [ ] نسخ احتياطي مجدول + اختبار استعادة ناجح.
 - [ ] قاعدة البيانات نظيفة من أي بيانات تجريبية/وهمية (`npm run db:clear-patients -- --yes`).

@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test:security": "NODE_ENV=test DATABASE_URL=\"${SECURITY_TEST_DATABASE_URL:-postgresql://test:test@127.0.0.1:1/test}\" SESSION_SECRET=security-test-session-secret-with-32-bytes FIELD_ENCRYPTION_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= NATIONAL_ID_PEPPER=security-test-national-id-pepper-with-32-bytes APP_URL=https://example.test tsx --test tests/security/*.test.ts",
     "db:migrate": "tsx scripts/migrate.ts",
+    "db:activation-preview": "tsx scripts/preview-account-activation.ts",
     "db:setup": "bash scripts/setup-postgres.sh && tsx scripts/migrate.ts && tsx scripts/create-admin.ts",
     "db:backup": "bash scripts/backup-db.sh",
     "db:clear-patients": "tsx scripts/clear-patient-data.ts"
@@ -24,6 +25,7 @@
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "recharts": "^2.15.4",
+    "resend": "^6.34.1",
     "tailwind-merge": "^2.6.0",
     "zod": "^3.25.76"
   },

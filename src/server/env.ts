@@ -13,13 +13,26 @@ const schema = z.object({
   APP_URL: z.string().default('http://localhost:3000'),
   DISPLAY_TIMEZONE: z.string().default('Asia/Baghdad'),
   INITIAL_ADMIN_EMAIL: z.string().email().optional(),
-  INITIAL_ADMIN_PASSWORD: z.string().min(8).optional(),
+  EMAIL_OTP_ENABLED: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
+  EMAIL_ACTIVATION_REQUIRED: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
+  EMAIL_PASSWORD_RECOVERY_ENABLED: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
+  RESEND_API_KEY: z.string().optional(),
+  RESEND_FROM_EMAIL: z.string().email().optional(),
   SESSION_IDLE_HOURS: z.coerce.number().default(8),
   SESSION_ABSOLUTE_DAYS: z.coerce.number().default(7),
   /** مسار متصفح Chromium المستخدم لتوليد ملفات PDF العربية */
   CHROMIUM_EXECUTABLE_PATH: z.string().optional(),
   PDF_ENGINE: z.enum(['chromium']).default('chromium'),
 }).superRefine((value, ctx) => {
+  if (value.EMAIL_ACTIVATION_REQUIRED && !value.EMAIL_OTP_ENABLED) {
+    ctx.addIssue({ code: 'custom', path: ['EMAIL_ACTIVATION_REQUIRED'], message: 'يتطلب تفعيل البريد EMAIL_OTP_ENABLED=true' });
+  }
+  if (value.EMAIL_PASSWORD_RECOVERY_ENABLED && !value.EMAIL_OTP_ENABLED) {
+    ctx.addIssue({ code: 'custom', path: ['EMAIL_PASSWORD_RECOVERY_ENABLED'], message: 'يتطلب الاسترداد EMAIL_OTP_ENABLED=true' });
+  }
+  if (value.EMAIL_OTP_ENABLED && (!value.RESEND_API_KEY || !value.RESEND_FROM_EMAIL)) {
+    ctx.addIssue({ code: 'custom', path: ['EMAIL_OTP_ENABLED'], message: 'إعدادات Resend مطلوبة عند تفعيل OTP' });
+  }
   if (value.NODE_ENV !== 'production') return;
   for (const name of ['SESSION_SECRET', 'NATIONAL_ID_PEPPER'] as const) {
     if (Buffer.byteLength(value[name], 'utf8') < 32) {

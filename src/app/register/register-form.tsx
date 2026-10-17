@@ -86,7 +86,7 @@ export function RegisterForm() {
     }
     setLoading(true);
     try {
-      await api.post('/api/auth/register', {
+      const result = await api.post<{ activationRequired?: boolean }>('/api/auth/register', {
         fullName: form.fullName.trim(),
         gender: form.gender,
         dateOfBirth: form.dateOfBirth,
@@ -98,7 +98,7 @@ export function RegisterForm() {
         confirmPassword: form.confirmPassword,
         nationalIdConsent: true,
       });
-      router.push('/dashboard');
+      router.push(result.activationRequired ? '/verify-email' : '/dashboard');
       router.refresh();
     } catch (err) {
       const e = err as { message?: string; fields?: Record<string, string> };

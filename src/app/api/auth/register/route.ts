@@ -1,6 +1,6 @@
 /**
  * POST /api/auth/register — إنشاء حساب مريض جديد.
- * - لا يوجد تفعيل بالبريد: الحساب يُفعّل فورًا.
+ * - تفعيل البريد اختياري عبر أعلام الإطلاق، ولا تنشأ جلسة قبل التحقق عند طلبه.
  * - الرقم الوطني يُخزَّن مشفَّرًا مع فهرس HMAC لمنع التكرار.
  */
 import { db } from '@/server/db';
@@ -9,6 +9,8 @@ import { ApiError, assertRateLimit, clientIp, createSession, hashPassword, setSe
 import { blindIndex, encryptField } from '@/server/lib/crypto';
 import { fail, handleError, ok, parseBody } from '@/server/http';
 import { registerSchema } from '@/server/validation/schemas';
+import { sendEmailOtp } from '@/server/services/email-otp';
+import { env } from '@/server/env';
 
 export async function POST(request: Request) {
   try {
@@ -46,6 +48,8 @@ export async function POST(request: Request) {
         passwordHash,
         role: 'PATIENT',
         status: 'ACTIVE',
+        emailActivationRequired: env().EMAIL_ACTIVATION_REQUIRED,
+        emailActivationExemption: env().EMAIL_ACTIVATION_REQUIRED ? null : 'FEATURE_DISABLED',
       }).returning();
 
       const [profile] = await tx.insert(patientProfiles).values({
@@ -64,21 +68,18 @@ export async function POST(request: Request) {
       return { user: user!, profile: profile! };
     });
 
+    await writeAudit({ actorUserId: created.user.id, actorRole: 'PATIENT', action: 'ACCOUNT_REGISTERED', targetType: 'user', targetId: created.user.id, metadata: { emailVerified: false }, ip });
+    if (env().EMAIL_ACTIVATION_REQUIRED) {
+      await sendEmailOtp({ userId: created.user.id, purpose: 'ACCOUNT_ACTIVATION', ip });
+      await writeAudit({ actorUserId: created.user.id, actorRole: 'PATIENT', action: 'ACCOUNT_ACTIVATION_PENDING', targetType: 'user', targetId: created.user.id, ip });
+      return ok({ user: { id: created.user.id, email: created.user.email, role: created.user.role }, profileId: created.profile.id, activationRequired: true });
+    }
+
     const session = await createSession(created.user.id, {
       ip,
       userAgent: request.headers.get('user-agent'),
     });
     await setSessionCookie(session.token, session.expiresAt, session.csrfToken);
-
-    await writeAudit({
-      actorUserId: created.user.id,
-      actorRole: 'PATIENT',
-      action: 'ACCOUNT_REGISTERED',
-      targetType: 'user',
-      targetId: created.user.id,
-      metadata: { emailVerified: false },
-      ip,
-    });
 
     return ok({
       user: { id: created.user.id, email: created.user.email, role: created.user.role },

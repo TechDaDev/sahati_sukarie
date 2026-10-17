@@ -127,6 +127,8 @@ export async function getCurrentSession(): Promise<SessionRecord | null> {
       email: users.email,
       role: users.role,
       status: users.status,
+      emailActivationRequired: users.emailActivationRequired,
+      emailVerifiedAt: users.emailVerifiedAt,
       mustChangePassword: users.mustChangePassword,
     })
     .from(sessions)
@@ -146,6 +148,7 @@ export async function getCurrentSession(): Promise<SessionRecord | null> {
     await db.update(sessions).set({ revokedAt: now }).where(eq(sessions.id, row.sessionId));
     return null;
   }
+  if (row.role === 'PATIENT' && row.emailActivationRequired && !row.emailVerifiedAt) return null;
 
   // تجديد انتهاء الخمول
   const idle = new Date(Math.min(

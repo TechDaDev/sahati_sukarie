@@ -68,6 +68,10 @@ export async function authenticate(
     throw new ApiError(403, 'ACCOUNT_DISABLED', 'هذا الحساب غير مُفعّل حاليًا. يرجى التواصل مع إدارة المنصة.');
   }
 
+  if (row.role === 'PATIENT' && row.emailActivationRequired && !row.emailVerifiedAt) {
+    throw new ApiError(403, 'EMAIL_VERIFICATION_REQUIRED', 'تحقق من بريدك الإلكتروني قبل تسجيل الدخول.');
+  }
+
   if (meta.requireRole && row.role !== meta.requireRole) {
     throw new ApiError(401, 'INVALID_CREDENTIALS', INVALID_CREDENTIALS);
   }

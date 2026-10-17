@@ -37,6 +37,7 @@ export async function loginMobile(email: string, password: string, meta: { ip: s
   if (user.lockedUntil && user.lockedUntil > new Date()) throw new ApiError(429, 'ACCOUNT_LOCKED', 'تم قفل الحساب مؤقتًا بسبب محاولات فاشلة متكررة. حاول لاحقًا.');
   if (user.status !== 'ACTIVE') throw new ApiError(403, 'ACCOUNT_DISABLED', 'هذا الحساب غير مُفعّل حاليًا.');
   if (user.role !== 'PATIENT') throw new ApiError(403, 'PATIENT_ONLY', 'هذا التطبيق مخصص لحسابات المرضى.');
+  if (user.emailActivationRequired && !user.emailVerifiedAt) throw new ApiError(403, 'EMAIL_VERIFICATION_REQUIRED', 'تحقق من بريدك الإلكتروني قبل تسجيل الدخول.');
   const now = new Date();
   await db.update(users).set({ failedLoginCount: 0, lockedUntil: null, lastLoginAt: now, updatedAt: now }).where(eq(users.id, user.id));
   const accessExpiresAt = new Date(now.getTime() + ACCESS_MS);
@@ -60,9 +61,9 @@ export async function authenticateBearer(request: Request): Promise<{ session: S
   if (!auth?.startsWith('Bearer ') || auth.length > 512) throw new ApiError(401, 'UNAUTHENTICATED', 'يجب تسجيل الدخول للمتابعة.');
   const token = auth.slice(7);
   if (!token.startsWith('sat_')) throw new ApiError(401, 'UNAUTHENTICATED', 'رمز الدخول غير صالح.');
-  const [row] = await db.select({ sessionId: mobileSessions.id, expiresAt: mobileSessions.accessExpiresAt, revokedAt: mobileSessions.revokedAt, userId: users.id, email: users.email, role: users.role, status: users.status, mustChangePassword: users.mustChangePassword }).from(mobileSessions).innerJoin(users, eq(users.id, mobileSessions.userId)).where(eq(mobileSessions.accessTokenHash, sha256Hex(token))).limit(1);
+  const [row] = await db.select({ sessionId: mobileSessions.id, expiresAt: mobileSessions.accessExpiresAt, revokedAt: mobileSessions.revokedAt, userId: users.id, email: users.email, role: users.role, status: users.status, mustChangePassword: users.mustChangePassword, emailActivationRequired: users.emailActivationRequired, emailVerifiedAt: users.emailVerifiedAt }).from(mobileSessions).innerJoin(users, eq(users.id, mobileSessions.userId)).where(eq(mobileSessions.accessTokenHash, sha256Hex(token))).limit(1);
   if (!row || row.revokedAt || row.expiresAt <= new Date()) throw new ApiError(401, 'UNAUTHENTICATED', 'رمز الدخول غير صالح أو منتهي.');
-  if (row.status !== 'ACTIVE' || row.role !== 'PATIENT') {
+  if (row.status !== 'ACTIVE' || row.role !== 'PATIENT' || (row.emailActivationRequired && !row.emailVerifiedAt)) {
     await db.update(mobileSessions).set({ revokedAt: new Date(), revocationReason: 'account_unavailable' }).where(and(eq(mobileSessions.id, row.sessionId), isNull(mobileSessions.revokedAt)));
     throw new ApiError(403, 'ACCOUNT_DISABLED', 'هذا الحساب غير مُفعّل حاليًا.');
   }
@@ -77,7 +78,7 @@ export async function refreshMobile(refreshToken: string, requestId: string, ip:
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const found = await client.query(`SELECT r.token_hash, r.mobile_session_id, r.generation, r.expires_at, r.used_at, r.rotation_request_id, s.user_id, s.refresh_expires_at, s.revoked_at, u.email, u.role, u.status, u.must_change_password FROM mobile_refresh_tokens r JOIN mobile_sessions s ON s.id=r.mobile_session_id JOIN users u ON u.id=s.user_id WHERE r.token_hash=$1 FOR UPDATE OF r,s`, [oldHash]);
+    const found = await client.query(`SELECT r.token_hash, r.mobile_session_id, r.generation, r.expires_at, r.used_at, r.rotation_request_id, s.user_id, s.refresh_expires_at, s.revoked_at, u.email, u.role, u.status, u.must_change_password, u.email_activation_required, u.email_verified_at FROM mobile_refresh_tokens r JOIN mobile_sessions s ON s.id=r.mobile_session_id JOIN users u ON u.id=s.user_id WHERE r.token_hash=$1 FOR UPDATE OF r,s`, [oldHash]);
     const row = found.rows[0];
     if (!row) { await client.query('ROLLBACK'); throw new ApiError(401, 'INVALID_REFRESH_TOKEN', 'رمز التجديد غير صالح أو منتهي.'); }
     const now = new Date();
@@ -91,7 +92,7 @@ export async function refreshMobile(refreshToken: string, requestId: string, ip:
       await writeAudit({ actorUserId: row.user_id, actorRole: 'PATIENT', action: 'MOBILE_REFRESH_REPLAY', targetType: 'mobile_session', targetId: row.mobile_session_id, ip });
       throw new ApiError(401, 'REFRESH_REPLAY_DETECTED', 'تم إلغاء جلسة الجهاز. سجّل الدخول مجددًا.');
     }
-    if (row.revoked_at || row.status !== 'ACTIVE' || row.role !== 'PATIENT' || new Date(row.expires_at) <= now || new Date(row.refresh_expires_at) <= now) {
+    if (row.revoked_at || row.status !== 'ACTIVE' || row.role !== 'PATIENT' || (row.email_activation_required && !row.email_verified_at) || new Date(row.expires_at) <= now || new Date(row.refresh_expires_at) <= now) {
       await client.query(`UPDATE mobile_sessions SET revoked_at=$2, revocation_reason='refresh_invalid' WHERE id=$1 AND revoked_at IS NULL`, [row.mobile_session_id, now]);
       await client.query('COMMIT');
       throw new ApiError(401, 'INVALID_REFRESH_TOKEN', 'رمز التجديد غير صالح أو منتهي.');

@@ -12,8 +12,9 @@ import { LogoMark } from '@/components/patient-shell';
 import { Icons, Spinner } from '@/components/ui';
 
 const NAV = [
-  { href: '/admin/password-requests', label: 'طلبات استعادة كلمة المرور' },
-  { href: '/admin/users', label: 'تحديد حسابات المرضى' },
+  { href: '/admin/users', label: 'إدارة الحسابات' },
+  { href: '/admin/email-delivery', label: 'حالة البريد' },
+  { href: '/admin/security-events', label: 'أحداث الأمان' },
 ];
 
 export function AdminShell({ children, email }: { children: ReactNode; email: string }) {

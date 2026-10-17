@@ -16,6 +16,8 @@ type UserRow = {
   phoneNumber: string;
   phoneVerified: boolean;
   status: string;
+  emailActivationRequired: boolean;
+  emailVerifiedAt: string | null;
   createdAt: string;
   lastLoginAt: string | null;
 };
@@ -56,13 +58,26 @@ export function UsersScreen({ numeralSystem }: { numeralSystem: NumeralSystem })
     }
   }
 
+  async function changeStatus(user: UserRow) {
+    const action = user.status === 'ACTIVE' ? 'SUSPEND' : user.status === 'SUSPENDED' ? 'RESTORE' : null;
+    if (!action) return;
+    setLoading(true);
+    setError(null);
+    try {
+      await api.post(`/api/admin/users/${user.id}/status`, { action });
+      await search();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally { setLoading(false); }
+  }
+
   return (
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl">تحديد حسابات المرضى</h1>
         <p className="mt-1 text-sm text-ink-muted">
           البحث متاح بالاسم، البريد الإلكتروني، الرقم الوطني (بحث محمي)، أو رقم الهاتف.
-          تُعرض بيانات تعريفية محدودة فقط لأغراض معالجة طلبات الاستعادة.
+          تُعرض بيانات محدودة لإدارة حالة الحساب.
         </p>
       </div>
 
@@ -131,8 +146,10 @@ export function UsersScreen({ numeralSystem }: { numeralSystem: NumeralSystem })
                     <th className="px-2 py-2 font-semibold">الرقم الوطني (مقنّع)</th>
                     <th className="px-2 py-2 font-semibold">الهاتف</th>
                     <th className="px-2 py-2 font-semibold">الحالة</th>
+                    <th className="px-2 py-2 font-semibold">تفعيل البريد</th>
                     <th className="px-2 py-2 font-semibold">تاريخ التسجيل</th>
                     <th className="px-2 py-2 font-semibold">آخر دخول</th>
+                    <th className="px-2 py-2 font-semibold">إجراء</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -152,9 +169,19 @@ export function UsersScreen({ numeralSystem }: { numeralSystem: NumeralSystem })
                       <td className="px-2 py-2.5">
                         <Badge tone={u.status === 'ACTIVE' ? 'ok' : 'danger'}>{STATUS_LABEL[u.status] ?? u.status}</Badge>
                       </td>
+                      <td className="px-2 py-2.5">
+                        <Badge tone={u.emailVerifiedAt ? 'ok' : 'neutral'}>{u.emailVerifiedAt ? 'مُتحقَّق' : u.emailActivationRequired ? 'بانتظار التفعيل' : 'غير مطلوب'}</Badge>
+                      </td>
                       <td className="px-2 py-2.5 text-xs num">{formatDate(u.createdAt, 'Asia/Baghdad', numeralSystem)}</td>
                       <td className="px-2 py-2.5 text-xs num">
                         {u.lastLoginAt ? formatDateTime(u.lastLoginAt, 'Asia/Baghdad', numeralSystem) : '—'}
+                      </td>
+                      <td className="px-2 py-2.5">
+                        {u.status === 'ACTIVE' || u.status === 'SUSPENDED' ? (
+                          <button type="button" className="btn-outline btn-sm" disabled={loading} onClick={() => void changeStatus(u)}>
+                            {u.status === 'ACTIVE' ? 'إيقاف' : 'استعادة'}
+                          </button>
+                        ) : '—'}
                       </td>
                     </tr>
                   ))}

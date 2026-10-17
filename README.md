@@ -78,7 +78,7 @@ npm run start          # http://localhost:3000
 | `NATIONAL_ID_PEPPER` | سر بناء فهرس البحث عن الرقم الوطني (HMAC) |
 | `APP_URL` | عنوان التطبيق |
 | `DISPLAY_TIMEZONE` | منطقة العرض الافتراضية (`Asia/Baghdad`) — التخزين دائمًا UTC |
-| `INITIAL_ADMIN_EMAIL` / `INITIAL_ADMIN_PASSWORD` | بيانات المدير الأول (تُقرأ مرة واحدة عند الإنشاء) |
+| `INITIAL_ADMIN_EMAIL` | بريد المدير الأول؛ يرسل `scripts/create-admin.ts` رابط إعداد أحادي الاستخدام صالحًا 30 دقيقة |
 | `SESSION_IDLE_HOURS` / `SESSION_ABSOLUTE_DAYS` | مهلة الخمول والمهلة المطلقة للجلسة |
 | `CHROMIUM_EXECUTABLE_PATH` | مسار Chromium لتوليد PDF (اختياري؛ يُستخدم متصفح Puppeteer المضمّن إن لم يُضبط) |
 

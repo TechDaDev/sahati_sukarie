@@ -79,6 +79,8 @@ export async function GET(request: Request) {
       phoneNumber: patientProfiles.phoneNumber,
       nationalIdLast4: patientProfiles.nationalIdLast4,
       mustChangePassword: users.mustChangePassword,
+      emailActivationRequired: users.emailActivationRequired,
+      emailVerifiedAt: users.emailVerifiedAt,
     })
       .from(users)
       .leftJoin(patientProfiles, eq(patientProfiles.userId, users.id))
@@ -102,6 +104,8 @@ export async function GET(request: Request) {
         phoneNumber: r.phoneNumber ? formatPhone(r.phoneNumber) : '—',
         phoneVerified: false,
         status: r.status,
+        emailActivationRequired: r.emailActivationRequired,
+        emailVerifiedAt: r.emailVerifiedAt,
         createdAt: r.createdAt,
         lastLoginAt: r.lastLoginAt,
       })),
