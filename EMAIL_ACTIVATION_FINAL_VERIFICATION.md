@@ -7,7 +7,7 @@
 
 - Railway project: `sahati-wa-sukari`; production app URL: `https://sahatisukarie.up.railway.app`.
 - Public mobile config endpoint confirms `EMAIL_OTP_ENABLED=true`, `EMAIL_PASSWORD_RECOVERY_ENABLED=true`, and `EMAIL_ACTIVATION_REQUIRED=true`. Railway variable values are redacted for this connector; no secret was read. `APP_URL` matches production.
-- Fix commit `eead9fca14417074e1224001ef0536c66ac9ab30` is pushed to `main`. Latest production deployment `890e5aec-01d1-4008-87cf-e6d045814c3a` is `SUCCESS` for that commit; fix deployment `89ce5d41-02ee-4a73-ae6b-e8cba5e10899` also succeeded.
+- Fix commit `eead9fca14417074e1224001ef0536c66ac9ab30` is pushed to `main`. Fix deployment `89ce5d41-02ee-4a73-ae6b-e8cba5e10899` and activation-enabled configuration deployment `890e5aec-01d1-4008-87cf-e6d045814c3a` both reached `SUCCESS`.
 
 ## Live synthetic account check
 
