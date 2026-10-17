@@ -3,6 +3,7 @@ import { AuthCard } from '@/components/auth-card';
 import { VerifyEmailForm } from './verify-email-form';
 
 export const metadata: Metadata = { title: 'تأكيد البريد الإلكتروني' };
+export const dynamic = 'force-dynamic';
 
 export default function VerifyEmailPage() {
   return <AuthCard title="تأكيد البريد الإلكتروني" subtitle="أدخل البريد المسجل ورمز التفعيل المرسل إليه."><VerifyEmailForm /></AuthCard>;

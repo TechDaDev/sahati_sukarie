@@ -13,13 +13,13 @@ Before migration, production had 3 accounts, all ACTIVE PATIENTs, and no adminis
 
 | Measure | Count |
 |---|---:|
-| Total accounts | 4 |
-| Patients | 3 |
-| Active patients | 3 |
+| Total accounts | 5 |
+| Patients | 4 |
+| Active patients | 4 |
 | Legacy activated patients | 3 |
-| Patients requiring activation | 0 |
+| Patients requiring activation | 1 synthetic test account |
 | Patient email timestamps marked verified | 0 |
-| Pending / suspended / disabled accounts | 0 / 0 / 0 |
+| Pending / suspended / disabled account statuses | 0 / 0 / 0 |
 | Administrators | 1 |
 
 The three pre-existing patients remain ACTIVE and use the `LEGACY_CUTOFF` exemption. This preserves existing access without inventing email-verification evidence. Their passwords, sessions, IDs, and medical records were not modified. No patient-identifying rows were returned.
@@ -28,4 +28,4 @@ The three pre-existing patients remain ACTIVE and use the `LEGACY_CUTOFF` exempt
 
 Local PostgreSQL migration coverage confirmed existing accounts retain exemption with null verification timestamps, while future accounts can require activation. Production aggregate confirms the same three patients remain active and exempt after deployment.
 
-Production `EMAIL_ACTIVATION_REQUIRED` is false/unset. New-account OTP redemption has not passed production end-to-end verification; mandatory activation awaits successful synthetic-account testing and separate explicit owner authorization.
+Production `EMAIL_ACTIVATION_REQUIRED` is currently false. One synthetic test patient was registered during a live canary; the activation email was accepted by Resend, but production still shows the account unverified. Its challenge expired with zero attempts and remains unconsumed. Browser reproduction found `/verify-email` was cached for a year without script CSP nonces, so React did not hydrate and the resend control stayed disabled. A dynamic-rendering fix and browser regression test pass locally and await deployment. Mandatory activation remains off until production activation and post-activation login checks pass. The three original patient accounts remain active and exempt; no patient passwords, sessions, or medical records were changed.

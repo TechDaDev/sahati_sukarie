@@ -274,6 +274,18 @@ test('administrator invitation fields hydrate, accept input, validate, and compl
     const recoveryResponse = await recoveryResponsePromise;
     assert.equal(recoveryResponse.status(), 200, 'Synthetic Forgot Password request receives the generic response.');
     await page.waitForFunction(() => document.body.innerText.includes('تم استلام الطلب'), { timeout: 5_000 });
+    await page.goto(`${baseUrl}/verify-email`, { waitUntil: 'networkidle0' });
+    const activationNonces = await page.$$eval('script[src]', (scripts) => scripts.map((script) => (script as HTMLScriptElement).nonce));
+    assert.ok(activationNonces.length > 0 && activationNonces.every(Boolean), 'Verify Email client scripts carry request CSP nonces.');
+    await page.waitForFunction(() => document.querySelector<HTMLInputElement>('#email') !== null);
+    await page.locator('#email').click();
+    await page.keyboard.type(`synthetic-activation-${suffix}@example.invalid`);
+    assert.equal(await page.$eval('button[type="button"]', (button) => !(button as HTMLButtonElement).disabled), true, 'Resend is enabled after the email field receives input.');
+    const resendResponsePromise = page.waitForResponse((response) => response.url() === `${baseUrl}/api/auth/activation/resend` && response.request().method() === 'POST');
+    await page.locator('button[type="button"]').click();
+    const resendResponse = await resendResponsePromise;
+    assert.equal(resendResponse.status(), 200, 'Synthetic activation resend receives the generic response without sending email when disabled.');
+    await page.waitForFunction(() => document.body.innerText.includes('إذا كان الحساب مؤهلًا'), { timeout: 5_000 });
     assert.deepEqual(browserErrors, [], 'Browser reports no hydration or runtime errors.');
   } finally {
     await browser?.close();

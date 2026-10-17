@@ -79,9 +79,16 @@ test('email OTP activation, limits, replay, reset, and session revocation (isola
 
   const originalFetch = globalThis.fetch;
   const delivered: Array<{ html: string; to: string[] }> = [];
+  let providerMode: 'success' | 'timeout' | 'rejection' = 'success';
   globalThis.fetch = async (input, init) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     if (url !== 'https://api.resend.com/emails') return originalFetch(input, init);
+    if (providerMode === 'timeout') throw new TypeError('synthetic provider timeout');
+    if (providerMode === 'rejection') {
+      return new Response(JSON.stringify({ name: 'validation_error', message: 'synthetic provider rejection' }), {
+        status: 422, headers: { 'content-type': 'application/json' },
+      });
+    }
     const payload = JSON.parse(String(init?.body)) as { html: string; to: string[] };
     delivered.push(payload);
     return new Response(JSON.stringify({ id: `mock-message-${delivered.length}` }), {
@@ -148,6 +155,10 @@ test('email OTP activation, limits, replay, reset, and session revocation (isola
     assert.equal(activationUser?.emailVerifiedAt, null);
     assert.equal(delivered.length, 1);
     assert.deepEqual(delivered[0]?.to, [email]);
+    await assert.rejects(() => loginMobile(email, 'Synthetic-OTP-Password-917!', { ip: '192.0.2.201' }),
+      (error: unknown) => error instanceof ApiError && error.code === 'EMAIL_VERIFICATION_REQUIRED');
+    assert.equal((await db.select({ id: mobileSessions.id }).from(mobileSessions)
+      .where(eq(mobileSessions.userId, activationUserId))).length, 0, 'Pending activation must not issue mobile sessions');
     const code = delivered[0]!.html.match(/letter-spacing:8px[^>]*>(\d{6})</)?.[1];
     assert.ok(code, 'Mocked provider payload should contain one six-digit OTP');
     const challenge = await db.query.emailOtpChallenges.findFirst({
@@ -171,6 +182,36 @@ test('email OTP activation, limits, replay, reset, and session revocation (isola
     assert.ok(activated?.emailVerifiedAt);
     const afterActivationLoginGate = await db.query.users.findFirst({ where: eq(users.id, activationUserId) });
     assert.ok(afterActivationLoginGate?.emailVerifiedAt, 'Account is eligible to sign in after OTP verification');
+
+    const registerForProviderFailure = async (delivery: 'timeout' | 'rejection') => {
+      const failedEmail = `otp-provider-${delivery}-${suffix}@example.invalid`;
+      const ip = `192.0.2.${randomInt(1, 255)}`;
+      providerMode = delivery;
+      const response = await register(new Request('https://example.test/api/auth/register', {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-real-ip': ip },
+        body: JSON.stringify({
+          fullName: 'Synthetic Provider Test', gender: 'MALE', dateOfBirth: '1980-01-01', heightCm: 170,
+          nationalId: String(randomInt(100_000_000_000, 999_999_999_999)), email: failedEmail, phone: '07000000000',
+          password: 'Synthetic-OTP-Password-917!', confirmPassword: 'Synthetic-OTP-Password-917!', nationalIdConsent: true,
+        }),
+      }));
+      providerMode = 'success';
+      assert.equal(response.status, 503, `${delivery} must fail closed during registration`);
+      assert.equal(response.headers.get('set-cookie'), null, 'Failed delivery must not create a browser session');
+      const failedUser = await db.query.users.findFirst({ where: eq(users.email, failedEmail) });
+      assert.ok(failedUser?.emailActivationRequired);
+      assert.equal(failedUser?.emailVerifiedAt, null);
+      ownedUserIds.push(failedUser!.id);
+      addRateKeys(failedUser!.id, failedEmail, ip);
+      const failedChallenge = await db.query.emailOtpChallenges.findFirst({
+        where: and(eq(emailOtpChallenges.userId, failedUser!.id), eq(emailOtpChallenges.purpose, 'ACCOUNT_ACTIVATION')),
+      });
+      assert.equal(failedChallenge?.deliveryStatus, 'FAILED');
+      assert.ok(failedChallenge?.consumedAt, 'Failed delivery must invalidate the undelivered challenge');
+      assert.equal((await db.select({ id: sessions.id }).from(sessions).where(eq(sessions.userId, failedUser!.id))).length, 0);
+    };
+    await registerForProviderFailure('timeout');
+    await registerForProviderFailure('rejection');
 
     const expiredUser = await makeUser(`otp-expired-${suffix}@example.invalid`);
     const expiredChallenge = await makeChallenge(expiredUser.id, 'ACCOUNT_ACTIVATION', '123456', { expiresAt: new Date(Date.now() - 1_000) });
