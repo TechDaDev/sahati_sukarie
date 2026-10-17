@@ -21,7 +21,7 @@ const PROTECTED_PREFIXES = [
 ];
 
 const ADMIN_PREFIXES = ['/admin'];
-const ADMIN_PUBLIC = ['/admin/login'];
+const ADMIN_PUBLIC = ['/admin/login', '/admin/accept-invitation'];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
