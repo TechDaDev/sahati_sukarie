@@ -46,7 +46,7 @@ async function waitForServer(url: string, child: ChildProcess): Promise<void> {
   throw new Error('Local Next.js server did not become ready.');
 }
 
-test('administrator invitation fields hydrate, accept input, validate, and complete setup', async (t) => {
+test('authentication pages hydrate under CSP and administrator invitation setup works', async (t) => {
   if (!databaseUrl) return t.skip('Set SECURITY_TEST_DATABASE_URL to an isolated local PostgreSQL database.');
   const parsedDatabaseUrl = new URL(databaseUrl);
   assert.ok(['localhost', '127.0.0.1', '::1'].includes(parsedDatabaseUrl.hostname), 'Refusing browser test against non-local database');
@@ -143,6 +143,60 @@ test('administrator invitation fields hydrate, accept input, validate, and compl
     await page.setExtraHTTPHeaders({ 'x-real-ip': invitationIp });
     const clipboardSession = await page.createCDPSession();
     await clipboardSession.send('Browser.grantPermissions', { origin: baseUrl, permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'] });
+
+    const authPages = [
+      { path: '/login', selector: '#email' },
+      { path: '/register', selector: '#fullName' },
+      { path: '/verify-email', selector: '#email' },
+      { path: '/forgot-password', selector: '#email' },
+      { path: '/reset-password', selector: '#email' },
+      { path: '/admin/accept-invitation', selector: '#newPassword' },
+      { path: '/admin/login', selector: '#admin-email' },
+    ];
+    for (const viewport of [
+      { width: 1280, height: 900 },
+      { width: 390, height: 844, isMobile: true, hasTouch: true },
+    ]) {
+      await page.setViewport(viewport);
+      for (const route of authPages) {
+        const response = await page.goto(`${baseUrl}${route.path}`, { waitUntil: 'networkidle0' });
+        assert.equal(response?.status(), 200, `${route.path} loads at ${viewport.width}px.`);
+        const csp = response?.headers()['content-security-policy'] ?? '';
+        const nonce = csp.match(/'nonce-([^']+)'/)?.[1];
+        assert.ok(nonce, `${route.path} CSP carries a nonce.`);
+        assert.doesNotMatch(csp.match(/script-src[^;]*/)?.[0] ?? '', /unsafe-inline|unsafe-eval/);
+        const nonces = await page.$$eval('script[src]', (scripts) => scripts.map((script) => (script as HTMLScriptElement).nonce));
+        assert.ok(nonces.length > 0 && nonces.every((scriptNonce) => scriptNonce === nonce), `${route.path} scripts match CSP nonce.`);
+        const layout = await page.evaluate(() => ({
+          direction: document.documentElement.dir,
+          width: document.documentElement.scrollWidth,
+          viewport: document.documentElement.clientWidth,
+        }));
+        assert.equal(layout.direction, 'rtl', `${route.path} keeps Arabic RTL layout.`);
+        assert.ok(layout.width <= layout.viewport + 1, `${route.path} has no horizontal overflow at ${viewport.width}px.`);
+        await page.waitForSelector(route.selector, { timeout: 5_000 });
+        const input = page.locator(route.selector);
+        const disabled = await page.$eval(route.selector, (element) => (element as HTMLInputElement).disabled);
+        if (!disabled) {
+          const probe = route.selector === '#fullName' ? 'Synthetic Audit' : `audit-${suffix}@example.invalid`;
+          await input.fill(probe);
+          assert.equal(await page.$eval(route.selector, (element) => (element as HTMLInputElement).value), probe, `${route.path} accepts input.`);
+        }
+      }
+    }
+    await page.setViewport({ width: 1280, height: 900 });
+    await page.goto(`${baseUrl}/register`, { waitUntil: 'networkidle0' });
+    await page.locator('button[type="submit"]').click();
+    await page.waitForSelector('[role="alert"]', { visible: true, timeout: 5_000 });
+    assert.ok((await page.$eval('[role="alert"]', (element) => element.textContent))?.trim(), 'Registration validation shows feedback without submitting incomplete data.');
+    await page.goto(`${baseUrl}/login`, { waitUntil: 'networkidle0' });
+    await page.locator('a[href="/forgot-password"]').click();
+    await page.waitForFunction(() => location.pathname === '/forgot-password', { timeout: 5_000 });
+    assert.ok(await page.$('#email'), 'Client-side navigation reaches Forgot Password.');
+    await page.goBack({ waitUntil: 'networkidle0' });
+    assert.equal(new URL(page.url()).pathname, '/login', 'Browser back returns to Login.');
+    await page.goForward({ waitUntil: 'networkidle0' });
+    assert.equal(new URL(page.url()).pathname, '/forgot-password', 'Browser forward returns to Forgot Password.');
 
     await page.goto(`${baseUrl}/admin/accept-invitation#token=${invitationToken}`, { waitUntil: 'networkidle0' });
     await page.waitForFunction(() => {
@@ -274,6 +328,32 @@ test('administrator invitation fields hydrate, accept input, validate, and compl
     const recoveryResponse = await recoveryResponsePromise;
     assert.equal(recoveryResponse.status(), 200, 'Synthetic Forgot Password request receives the generic response.');
     await page.waitForFunction(() => document.body.innerText.includes('تم استلام الطلب'), { timeout: 5_000 });
+
+    const resetResponse = await page.goto(`${baseUrl}/reset-password`, { waitUntil: 'networkidle0' });
+    assert.equal(resetResponse?.status(), 200, 'Reset Password page loads.');
+    const resetHeaders = resetResponse?.headers() ?? {};
+    assert.match(resetHeaders['cache-control'] ?? '', /private|no-cache|no-store/, 'Reset Password page is not publicly cached.');
+    assert.doesNotMatch(resetHeaders['cache-control'] ?? '', /s-maxage=\d+/, 'Reset Password page has no shared cache lifetime.');
+    const resetCsp = resetHeaders['content-security-policy'] ?? '';
+    const resetNonce = resetCsp.match(/'nonce-([^']+)'/)?.[1];
+    assert.ok(resetNonce, 'Reset Password response CSP contains a nonce.');
+    assert.doesNotMatch(resetCsp.match(/script-src[^;]*/)?.[0] ?? '', /unsafe-inline|unsafe-eval/, 'Script CSP does not weaken nonce policy.');
+    const resetScriptNonces = await page.$$eval('script[src]', (scripts) => scripts.map((script) => (script as HTMLScriptElement).nonce));
+    assert.ok(resetScriptNonces.length > 0 && resetScriptNonces.every((nonce) => nonce === resetNonce), 'Reset Password scripts match response CSP nonce.');
+    await page.waitForFunction(() => document.querySelector<HTMLInputElement>('#email') !== null);
+    await page.locator('#email').click();
+    await page.keyboard.type(`synthetic-reset-${suffix}@example.invalid`);
+    assert.equal(await page.$eval('button[type="button"]', (button) => !(button as HTMLButtonElement).disabled), true, 'Reset resend enables after email input.');
+    const resetResendPromise = page.waitForResponse((response) => response.url() === `${baseUrl}/api/forgot-password` && response.request().method() === 'POST');
+    await page.locator('button[type="button"]').click();
+    const resetResendResponse = await resetResendPromise;
+    assert.equal(resetResendResponse.status(), 200, 'Reset resend handler returns the generic response with email disabled.');
+    await page.waitForFunction(() => document.body.innerText.includes('إذا كان البريد مسجلًا'), { timeout: 5_000 });
+    const refreshedReset = await page.reload({ waitUntil: 'networkidle0' });
+    const refreshedNonce = refreshedReset?.headers()['content-security-policy']?.match(/'nonce-([^']+)'/)?.[1];
+    assert.ok(refreshedNonce && refreshedNonce !== resetNonce, 'Direct refresh receives a fresh request-specific CSP nonce.');
+    await page.waitForSelector('#email', { timeout: 5_000 });
+
     await page.goto(`${baseUrl}/verify-email`, { waitUntil: 'networkidle0' });
     const activationNonces = await page.$$eval('script[src]', (scripts) => scripts.map((script) => (script as HTMLScriptElement).nonce));
     assert.ok(activationNonces.length > 0 && activationNonces.every(Boolean), 'Verify Email client scripts carry request CSP nonces.');
@@ -303,7 +383,10 @@ test('administrator invitation fields hydrate, accept input, validate, and compl
       await db.delete(auditLogs).where(inArray(auditLogs.actorUserId, userIds));
       await db.delete(users).where(inArray(users.id, userIds));
     }
-    await db.delete(rateLimitCounters).where(eq(rateLimitCounters.key, `admin-invitation:${invitationIpHash}`));
+    await db.delete(rateLimitCounters).where(inArray(rateLimitCounters.key, [
+      `admin-invitation:${invitationIpHash}`,
+      `forgot:${invitationIp}`,
+    ]));
     await pool.end();
   }
 });

@@ -6,6 +6,7 @@ import { Alert } from '@/components/ui';
 import { ResetPasswordForm } from './reset-form';
 
 export const metadata: Metadata = { title: 'تعيين كلمة مرور جديدة' };
+export const dynamic = 'force-dynamic';
 
 export default function ResetPasswordPage() {
   return (
