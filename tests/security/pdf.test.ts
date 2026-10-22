@@ -1,16 +1,19 @@
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { createServer } from 'node:http';
 import test from 'node:test';
 import type { ReportData } from '../../src/server/services/reports';
 import { renderHealthReportPdf } from '../../src/server/reports/pdf';
 
-test('PDF renderer handles hostile patient text as inert text', async (t) => {
-  const executablePath = process.env.SECURITY_TEST_CHROMIUM_PATH;
-  if (!executablePath) return t.skip('Set SECURITY_TEST_CHROMIUM_PATH to a local Chromium executable.');
-  assert.ok(existsSync(executablePath), 'Configured test Chromium must exist');
-  process.env.CHROMIUM_EXECUTABLE_PATH = executablePath;
-
-  const malicious = '<script>throw new Error("xss")</script><img src="https://invalid.example/pixel">';
+test('PDF renderer handles hostile patient text as inert text without network access', async () => {
+  let requestCount = 0;
+  const server = createServer((_request, response) => {
+    requestCount += 1;
+    response.end('unexpected request');
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== 'string');
+  const malicious = `<script>throw new Error("xss")</script><img src="http://127.0.0.1:${address.port}/pixel">`;
   const data = {
     patient: { fullName: malicious, age: 40, gender: 'MALE', heightCm: 170, diabetesType: null,
       treatmentApproach: null, monitoringMethod: null, diagnosisDate: null, diagnosisYear: null },
@@ -23,7 +26,12 @@ test('PDF renderer handles hostile patient text as inert text', async (t) => {
     symptoms: [{ id: 'synthetic', at: new Date(), type: 'OTHER', severity: 'MILD', notes: malicious }],
     weights: [], hba1c: [], labs: [], notes: { healthNotes: malicious, diabetesNotes: null }, emptyStates: [],
   } as ReportData;
-  const pdf = await renderHealthReportPdf(data, { unit: 'MG_DL', numeralSystem: 'LATIN', timezone: 'Asia/Baghdad' });
-  assert.equal(Buffer.from(pdf).subarray(0, 5).toString('ascii'), '%PDF-');
-  assert.ok(pdf.length > 5_000, 'Generated report must contain rendered document pages');
+  try {
+    const pdf = await renderHealthReportPdf(data, { unit: 'MG_DL', numeralSystem: 'LATIN', timezone: 'Asia/Baghdad' });
+    assert.equal(Buffer.from(pdf).subarray(0, 5).toString('ascii'), '%PDF-');
+    assert.ok(pdf.length > 5_000, 'Generated report must contain rendered document pages');
+    assert.equal(requestCount, 0, 'Report rendering must not fetch patient-controlled URLs');
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
 });

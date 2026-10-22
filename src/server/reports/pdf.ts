@@ -1,20 +1,17 @@
 /**
  * مولّد تقرير PDF العربي (RTL).
  * ---------------------------------------------------------------------------
- * لماذا Chromium؟ تشكيل الحروف العربية المتصل (contextual shaping) وترتيب
- * الاتجاهين (BiDi) وتطبيق خطوط الويب كلها مهام معقدة؛ محركات PDF التي ترسم
- * الحروف بشكل منفصل تُنتج نصًا عربيًا مقطّعًا أو معكوسًا. لذلك نُصيّر التقرير
- * كصفحة HTML عربية RTL ثم نطبعها إلى PDF عبر متصفح Chromium بدون واجهة،
- * وهو ما يضمن ظهور العربية بشكل صحيح تمامًا.
+ * يُصيّر التقرير كصفحة HTML عربية RTL باستخدام WeasyPrint، الذي يستخدم
+ * Pango/HarfBuzz لتشكيل Cairo ويكتب PDF دون تشغيل JavaScript أو متصفح Chromium.
  *
- * المتطلبات: حزمة Chromium (تُثبَّت عبر npm install puppeteer).
- * إن لم تتوفر، يُرجع خطأ واضحًا بدل إنتاج ملف تالف.
+ * المتطلبات: WeasyPrint ومكتبات Pango/Cairo المثبتة في صورة Docker.
  */
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { ReportData } from '../services/reports';
 import { formatDate, formatDateTime, formatNumber, applyNumerals, type NumeralSystem } from '../../lib/format';
 import { labelOf } from '../../lib/labels';
+import { renderHtmlToPdf } from './weasyprint';
 
 export type PdfOptions = {
   unit: 'MG_DL' | 'MMOL_L';
@@ -84,7 +81,6 @@ function glucoseChartSvg(data: ReportData, opts: PdfOptions): string {
     ${dots}
     <text x="${padX}" y="${H - 6}" font-size="10" fill="#6B8299" direction="ltr" text-anchor="start">${esc(firstLabel)}</text>
     <text x="${plotRight}" y="${H - 6}" font-size="10" fill="#6B8299" direction="ltr" text-anchor="end">${esc(lastLabel)}</text>
-    <text x="${plotRight / 2 + padX / 2}" y="14" font-size="10" fill="#6B8299" text-anchor="middle">وحدة العرض: ${opts.unit === 'MG_DL' ? 'mg/dL' : 'mmol/L'}</text>
   </svg>`;
 }
 
@@ -163,7 +159,7 @@ function buildHtml(data: ReportData, opts: PdfOptions, fonts: { regular: string;
     formatDate(l.date, tz, n),
     esc(labelOf('labTest', l.testType)),
     l.testType === 'BLOOD_PRESSURE'
-      ? `<span class="num">${num(l.value)}</span>/<span class="num">${num(l.valueSecondary ?? 0)}</span> ${esc(l.unit)}`
+      ? `<span class="num">${num(l.value)}/${num(l.valueSecondary ?? 0)} ${esc(l.unit)}</span>`
       : `<span class="num">${num(l.value, l.value % 1 === 0 ? 0 : 2)}</span> ${esc(l.unit)}`,
   ]);
 
@@ -198,8 +194,11 @@ function buildHtml(data: ReportData, opts: PdfOptions, fonts: { regular: string;
   .sub { color: #6B8299; font-size: 11px; }
   .meta { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 8px; font-size: 10.5px; color: #3C5872; }
   h2 { color: #2463A6; font-size: 14px; margin: 0 0 6px; border-right: 4px solid #16A6A0; padding-right: 8px; }
-  section { margin-bottom: 14px; page-break-inside: avoid; }
+  section { margin-bottom: 14px; }
+  h2, .note { break-after: avoid; page-break-after: avoid; }
   table { width: 100%; border-collapse: collapse; }
+  thead { display: table-header-group; }
+  tr { break-inside: avoid; page-break-inside: avoid; }
   th, td { border: 1px solid #DCEAF6; padding: 4px 6px; text-align: right; font-size: 10.5px; }
   th { background: #F5F9FC; color: #17324D; font-weight: 600; }
   .cards { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
@@ -239,7 +238,7 @@ ${section('ملخص قراءات السكر',
     </div>${table(['السياق', 'العدد', 'المتوسط'], contextRows)}`,
     'القيم أعلاه وصفية لما تم تسجيله فعليًا ولا تمثل نطاقات مستهدفة للعلاج.')}
 
-${section('مخطط قراءات السكر', glucoseChartSvg(data, opts))}
+${section('مخطط قراءات السكر', `<div style="text-align:center;color:#6B8299;font-size:9.5px;margin-bottom:4px">وحدة العرض: <span class="num">${opts.unit === 'MG_DL' ? 'mg/dL' : 'mmol/L'}</span></div>${glucoseChartSvg(data, opts)}`)}
 
 ${section('الأدوية المسجّلة', table(['الدواء', 'التصنيف', 'التركيز / الجرعة الموصوفة', 'التكرار', 'طريقة الإعطاء', 'الحالة'], medRows),
     'الجرعة الموصوفة هنا هي ما أدخله المريض، وليست توصية علاجية من المنصة.')}
@@ -284,24 +283,6 @@ ${emptyBlock}
 </body></html>`;
 }
 
-/** الحصول على مسار متصفح Chromium القابل للتنفيذ */
-export async function resolveChromiumPath(): Promise<string | null> {
-  const { existsSync } = await import('node:fs');
-
-  // المسار المضبوط في متغيرات البيئة أولًا، لكن فقط إن كان الملف موجودًا فعلًا
-  const configured = process.env.CHROMIUM_EXECUTABLE_PATH;
-  if (configured && existsSync(configured)) return configured;
-
-  try {
-    const puppeteer = await import('puppeteer');
-    const bundled = await puppeteer.default.executablePath();
-    if (bundled && existsSync(bundled)) return bundled;
-  } catch {
-    /* الحزمة غير مثبّتة */
-  }
-  return null;
-}
-
 /**
  * يبني مستند HTML الكامل للتقرير (خطوط مضمّنة base64).
  * مُصدَّر لكي تتمكّن الاختبارات من التحقق من النصوص الإلزامية
@@ -324,38 +305,7 @@ export async function buildReportHtml(data: ReportData, opts: PdfOptions): Promi
 }
 
 export async function renderHealthReportPdf(data: ReportData, opts: PdfOptions): Promise<Uint8Array> {
-  const executablePath = await resolveChromiumPath();
-  if (!executablePath) {
-    throw new Error('محرك PDF (Chromium) غير متوفر في هذه البيئة.');
-  }
-
   const fonts = await loadFonts();
   const html = buildHtml(data, opts, fonts);
-
-  const puppeteer = (await import('puppeteer')).default;
-  const browser = await puppeteer.launch({
-    executablePath,
-    headless: true,
-    args: ['--disable-dev-shm-usage', '--font-render-hinting=none'],
-  });
-  try {
-    const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: 'load', timeout: 30_000 });
-    await page.evaluate(() => document.fonts.ready);
-    const buffer = await page.pdf({
-      format: 'A4',
-      printBackground: true,
-      margin: { top: '12mm', bottom: '12mm', left: '10mm', right: '10mm' },
-      displayHeaderFooter: true,
-      headerTemplate: '<div></div>',
-      footerTemplate: `<style>
-        @font-face { font-family:'Cairo'; src:url('${fonts.regular}') format('truetype'); }
-        .f { font-family:'Cairo', sans-serif; font-size:8px; width:100%; text-align:center; color:#6B8299; }
-      </style>
-      <div class="f">صحتي وسكري — صفحة <span class="pageNumber"></span> من <span class="totalPages"></span></div>`,
-    });
-    return new Uint8Array(buffer);
-  } finally {
-    await browser.close();
-  }
+  return renderHtmlToPdf(html);
 }

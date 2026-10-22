@@ -1,8 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  // puppeteer must stay external to the server bundle (native launcher + chromium binary)
-  serverExternalPackages: ['puppeteer'],
   poweredByHeader: false,
   async headers() {
     return [
