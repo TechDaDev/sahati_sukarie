@@ -1,6 +1,6 @@
 # دليل النشر — منصة «صحتي وسكري»
 
-هذا المستند يشرح نشر النسخة الأولى (MVP) في بيئة إنتاج حقيقية، مع النسخ الاحتياطي والمراقبة وقائمة تحقق أمنية.
+هذا المستند يشرح نشر منصة صحتي وسكري في بيئة إنتاج حقيقية، مع النسخ الاحتياطي والمراقبة وقائمة تحقق أمنية.
 
 ---
 
@@ -11,8 +11,8 @@
 | نظام التشغيل | Linux (Debian/Ubuntu أو ما يعادلها) |
 | Node.js | 20 LTS أو أحدث |
 | PostgreSQL | 15 أو أحدث (اختُبر على 17) |
-| Chromium | أي إصدار حديث — **مطلوب لتوليد تقارير PDF العربية** |
-| الذاكرة | 2 GB RAM (Chromium يحتاج ~300 MB لكل تقرير) |
+| Python وWeasyPrint | الاعتماديات في `requirements-pdf.txt` ومكتبات Pango/Cairo كما في `Dockerfile` |
+| الذاكرة | راقب استهلاك الذاكرة أثناء توليد التقارير وحدد الموارد حسب الحمل |
 
 ---
 
@@ -115,14 +115,13 @@ server {
 
 ---
 
-## 5. تقارير PDF (Chromium)
+## 5. تقارير PDF (WeasyPrint)
 
-يُستخدم Chromium عبر Puppeteer لتوليد ملفات PDF عربية RTL بخطوط مضمّنة.
+يُستخدم WeasyPrint عبر عملية Python لتوليد ملفات PDF عربية RTL بخطوط مضمّنة، دون تشغيل JavaScript أو Chromium.
 
-- عند `npm install` يُنزّل Puppeteer نسخة Chromium إلى `~/.cache/puppeteer`.
-- إن كان المتصفح مثبّتًا في مسار آخر، اضبط `CHROMIUM_EXECUTABLE_PATH`.
-- إن لم يتوفر أي متصفح، تُعيد نقطة `/api/reports/pdf` الاستجابة `503 PDF_UNAVAILABLE` (ولا يتعطّل باقي التطبيق).
-- في بيئات الحاويات قد تحتاج إلى `--no-sandbox` (مُستخدم افتراضيًا في هذا المشروع) وذاكرة مشتركة أكبر (`--disable-dev-shm-usage`).
+- تثبّت صورة Docker اعتماديات `requirements-pdf.txt` ومكتبات Pango/Cairo.
+- اضبط `SAHATI_PDF_RENDERER_PYTHON` على مسار Python الذي يحتوي على WeasyPrint عند التشغيل خارج الصورة.
+- عند تعذّر توليد التقرير، تُعيد نقطة `/api/reports/pdf` الاستجابة `503 PDF_UNAVAILABLE` (ولا يتعطّل باقي التطبيق).
 
 ---
 
@@ -152,7 +151,7 @@ pg_restore --clean --if-exists --no-owner -d "$DATABASE_URL" backups/sahati-<UTC
 - سجلات التطبيق: مخرجات systemd (`journalctl -u sahati -f`).
 - سجلات قاعدة البيانات: `/var/log/postgresql/`.
 - ملاحظة: رسائل الأخطاء في الواجهة عامة ولا تكشف تفاصيل داخلية؛ التفاصيل التقنية تُطبع في سجلات الخادم فقط.
-- راقب: `/api/health`-غير متوفر في هذه النسخة؛ استخدم فحص الصفحة الرئيسية `GET /` كفحص حياة بسيط.
+- راقب: `GET /api/health`؛ يفحص اتصال قاعدة البيانات باستعلام `select 1` ويعيد `200` عند الجاهزية و`503` عند التعذّر.
 - راقب جدول `rate_limit_counters` وسجل `audit_logs` لاكتشاف محاولات الدخول غير الطبيعية.
 
 ---
@@ -174,4 +173,4 @@ pg_restore --clean --if-exists --no-owner -d "$DATABASE_URL" backups/sahati-<UTC
 
 - **وصول الطبيب**: الجداول مبنية على `patient_id` مع فهارس ومفاتيح أجنبية، ويمكن إضافة جدول ربط `doctor_patient_access` ودور `DOCTOR` دون تغيير المخطط الأساسي.
 - **منطقة زمنية لكل مريض**: العمود `timezone` موجود في `patient_profiles` (العرض الافتراضي `Asia/Baghdad`).
-- **حالة التسجيل/التحقق**: حقول `email_verified` و`phone_verified` موجودة ومعدّة للتوسعة لاحقًا دون تغيير الواجهات.
+- **حالة التسجيل/التحقق**: تفعيل البريد متاح عند تمكين `EMAIL_OTP_ENABLED` و`EMAIL_ACTIVATION_REQUIRED` وإعداد Resend؛ يبقى التحقق من الهاتف خارج النطاق.

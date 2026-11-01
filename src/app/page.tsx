@@ -32,7 +32,7 @@ const FEATURES = [
 ];
 
 const STEPS = [
-  { n: '١', t: 'أنشئ حسابك', d: 'التسجيل فوري ولا يحتاج تفعيل بريد إلكتروني في هذه النسخة.' },
+  { n: '١', t: 'أنشئ حسابك', d: 'أنشئ حسابك واتبع تعليمات تفعيل البريد الإلكتروني عند طلبها.' },
   { n: '٢', t: 'أكمل ملفك الصحي', d: 'كل الحقول الطبية اختيارية، ويمكنك إكمالها تدريجيًا في أي وقت.' },
   { n: '٣', t: 'ابدأ التسجيل اليومي', d: 'قياسات السكر، الأدوية، الوجبات، النشاط، النوم والأعراض.' },
   { n: '٤', t: 'راجع تقاريرك', d: 'اطّلع على الاتجاهات ونزّل تقريرًا عربيًا وشاركه مع طبيبك.' },
@@ -63,7 +63,7 @@ export default async function LandingPage() {
         <section className="relative overflow-hidden border-b border-brand-100 bg-gradient-to-b from-white via-brand-50/60 to-canvas">
           <div className="mx-auto grid max-w-6xl gap-10 px-4 py-12 lg:grid-cols-2 lg:items-center lg:py-16">
             <div>
-              <span className="chip bg-teal-50 text-teal-700">إصدار أولي (MVP) — نسخة للتجربة</span>
+              <span className="chip bg-teal-50 text-teal-700">منصة صحية رقمية</span>
               <h1 className="mt-4 text-3xl leading-tight sm:text-4xl lg:text-5xl">
                 صحتي وسكري
               </h1>
@@ -167,7 +167,7 @@ export default async function LandingPage() {
 
       <footer className="border-t border-brand-100 bg-white py-6">
         <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 text-xs text-ink-muted sm:flex-row sm:items-center sm:justify-between">
-          <span>صحتي وسكري — إصدار أولي (MVP) لتوثيق المتابعة الشخصية لمرضى السكري.</span>
+          <span>صحتي وسكري — منصتك الشخصية لمتابعة مرض السكري وتنظيم حياتك اليومية.</span>
           <span className="flex flex-wrap gap-3">
             <Link href="/login" className="hover:text-brand-600">تسجيل الدخول</Link>
             <Link href="/register" className="hover:text-brand-600">إنشاء حساب</Link>
